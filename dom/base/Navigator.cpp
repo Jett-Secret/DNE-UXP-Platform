@@ -1500,6 +1500,13 @@ Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow, nsIURI* aURI,
     return NS_OK;
   }
 
+
+  //aUserAgent.AppendLiteral(get_uuid()); //get_uuid just needs to get a highly low collision string of characters.  16-32 alphanum should do
+   // get a random string to append to the end of the ua in an attempt to break fingerprinting
+  // future will need to block canvas type printing.  Might want to do the same thing with
+  // any sorts of hardware specs or just block those checks completely.
+  // and of course audio fingerprinting will be a pain in the ass.  Could attempt to add some specific
+  // noise?  Maybe its not even necessary if other stuff works.
   return siteSpecificUA->GetUserAgentForURIAndWindow(aURI, aWindow, aUserAgent);
 }
 

@@ -345,8 +345,8 @@ HttpBaseChannel::SetDocshellUserAgentOverride()
   if (customUserAgent.IsEmpty()) {
     return NS_OK;
   }
-
   NS_ConvertUTF16toUTF8 utf8CustomUserAgent(customUserAgent);
+
   rv = SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"), utf8CustomUserAgent, false);
   if (NS_FAILED(rv)) return rv;
 

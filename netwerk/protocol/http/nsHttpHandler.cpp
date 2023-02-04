@@ -684,8 +684,33 @@ nsHttpHandler::UserAgent()
         BuildUserAgent();
         mUserAgentIsDirty = false;
     }
+    // make the random string
 
-    return mUserAgent;
+// this works but it acts on the global mUserAgent string.  This means
+// that the user agent string grows by 17 characters every webpage thats
+// loaded.  Thus use a local variable and return that instead as
+// return mUserAgent + ";" + localVar; or something like that
+   /* nsCString C("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+    nsCString offsetString(";");
+    for(int i =0; i<16; i++)
+    {
+        int r = rand() % 62;
+        const nsDependentCSubstring _char = Substring(C, r, 1);
+        offsetString.Append(_char);
+    }
+    nsCString s = mUserAgent + offsetString;
+    /*nsCString chararray("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+    nsCString str(";");
+    for(int i =0; i<16; i++)
+    {
+        int r = rand() % 62;
+        const nsDependentCSubstring _char = Substring(chararray, r, 1);
+        str.Append(_char);
+    }
+    customUserAgent.Append(NS_ConvertUTF8toUTF16(str));
+      NS_ConvertUTF16toUTF8 utf8CustomUserAgent(customUserAgent);*/
+
+    return  mUserAgent;
 }
 
 void
@@ -770,6 +795,7 @@ nsHttpHandler::BuildUserAgent()
         mUserAgent += '/';
         mUserAgent += mAppVersion;
     }
+
 }
 
 #ifdef XP_WIN
