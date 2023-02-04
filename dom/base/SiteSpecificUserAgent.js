@@ -36,8 +36,9 @@ function SiteSpecificUserAgent() {
 
 SiteSpecificUserAgent.prototype = {
   getUserAgentForURIAndWindow: function ssua_getUserAgentForURIAndWindow(aURI, aWindow) {
+
     if (this.inParent) {
-      return UserAgentOverrides.getOverrideForURI(aURI) || HTTP_PROTO_HANDLER.userAgent;
+      return UserAgentOverrides.getOverrideForURI(aURI) || HTTP_PROTO_HANDLER.userAgent + offsetString;
     }
 
     let host = aURI.asciiHost;
@@ -47,7 +48,7 @@ SiteSpecificUserAgent.prototype = {
     }
 
     let data = { uri: aURI.spec };
-    let result = cpmm.sendRpcMessage("Useragent:GetOverride", data)[0] || HTTP_PROTO_HANDLER.userAgent;
+    let result = cpmm.sendRpcMessage("Useragent:GetOverride", data)[0] || HTTP_PROTO_HANDLER.userAgent + offsetString;
 
     if (this.userAgentCache.size >= MAX_CACHE_SIZE) {
       this.userAgentCache.clear();
