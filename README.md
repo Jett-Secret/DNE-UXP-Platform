@@ -1,3 +1,6 @@
+# DNE Platform
+This is a clone of the UXP (not goanna) platform for palemoon.  This platform exists as palemoon, during the development of DNE Beta, switched to Goanna, not UXP, and I did not update before completion.  Some future work will attempt to switch to Goanna, but this will be considered legacy and will monitory with the original UXP.  Hence, this repo exists only to ensure that the DNE soruce code builds and runs correctly.
+
 # Unified XUL Platform (UXP)
 
 This repository holds the code for a unified application platform for XUL-based
@@ -33,5 +36,3 @@ If you fork this repository to perform your own work on it, please consider offe
 improvement patches upstream to its origin to mutually improve the platform and build
 a future for XUL.
 
-## Looking for Pale Moon and Basilisk?
-As of [`Issue #969`](https://repo.palemoon.org/MoonchildProductions/UXP/issues/969), release versions `28.9.0` and `2020.03.04` respectively, they have been split off into their own dedicated repositories located at [`MoonchildProductions/Pale-Moon`](https://repo.palemoon.org/MoonchildProductions/Pale-Moon) and [`MoonchildProductions/Basilisk`](https://repo.palemoon.org/MoonchildProductions/Basilisk).
