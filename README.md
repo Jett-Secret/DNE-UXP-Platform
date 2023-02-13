@@ -1,5 +1,5 @@
 # DNE Platform
-This is a clone of the UXP (not goanna) platform for palemoon.  This platform exists as palemoon, during the development of DNE Beta, switched to Goanna, not UXP, and I did not update before completion.  Some future work will attempt to switch to Goanna, but this will be considered legacy and will monitory with the original UXP.  Hence, this repo exists only to ensure that the DNE soruce code builds and runs correctly.
+This is a clone of the UXP (not goanna) platform for palemoon.  This platform exists as a workaround for the toolbars issue (see [DNE Repo](https://github.com/Jett-Secret/Danknet-Explorer)).  Scrollbars in xul are default handled in the platform submodule (UXP) and so in order to change the scrollbars, images in that repo were changed.  Hence this repository holds those changes until a better fix is found.
 
 # Unified XUL Platform (UXP)
 
