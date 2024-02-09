@@ -935,6 +935,9 @@ MConstant::MConstant(const js::Value& vp, CompilerConstraintList* constraints)
       case MIRType::Symbol:
         payload_.sym = vp.toSymbol();
         break;
+      case MIRType::BigInt:
+        payload_.bi = vp.toBigInt();
+        break;
       case MIRType::Object:
         payload_.obj = &vp.toObject();
         // Create a singleton type set for the object. This isn't necessary for
@@ -1014,7 +1017,12 @@ MConstant::assertInitializedPayload() const
       case MIRType::String:
       case MIRType::Object:
       case MIRType::Symbol:
+      case MIRType::BigInt:
+#if MOZ_LITTLE_ENDIAN
         MOZ_ASSERT_IF(JS_BITS_PER_WORD == 32, (payload_.asBits >> 32) == 0);
+#else
+        MOZ_ASSERT_IF(JS_BITS_PER_WORD == 32, (payload_.asBits << 32) == 0);
+#endif
         break;
       default:
         MOZ_ASSERT(IsNullOrUndefined(type()) || IsMagicType(type()));
@@ -1103,6 +1111,9 @@ MConstant::printOpcode(GenericPrinter& out) const
       case MIRType::Symbol:
         out.printf("symbol at %p", (void*)toSymbol());
         break;
+      case MIRType::BigInt:
+        out.printf("BigInt at %p", (void*)toBigInt());
+        break;
       case MIRType::String:
         out.printf("string %p", (void*)toString());
         break;
@@ -1164,6 +1175,8 @@ MConstant::toJSValue() const
         return StringValue(toString());
       case MIRType::Symbol:
         return SymbolValue(toSymbol());
+      case MIRType::BigInt:
+        return BigIntValue(toBigInt());
       case MIRType::Object:
         return ObjectValue(toObject());
       case MIRType::MagicOptimizedArguments:
@@ -1207,6 +1220,9 @@ MConstant::valueToBoolean(bool* res) const
       case MIRType::Symbol:
         *res = true;
         return true;
+      case MIRType::BigInt:
+        *res = !toBigInt()->isZero();
+        return true;
       case MIRType::String:
         *res = toString()->length() != 0;
         return true;
@@ -1217,530 +1233,6 @@ MConstant::valueToBoolean(bool* res) const
         MOZ_ASSERT(IsMagicType(type()));
         return false;
     }
-}
-
-MDefinition*
-MSimdValueX4::foldsTo(TempAllocator& alloc)
-{
-#ifdef DEBUG
-    MIRType laneType = SimdTypeToLaneArgumentType(type());
-#endif
-    bool allConstants = true;
-    bool allSame = true;
-
-    for (size_t i = 0; i < 4; ++i) {
-        MDefinition* op = getOperand(i);
-        MOZ_ASSERT(op->type() == laneType);
-        if (!op->isConstant())
-            allConstants = false;
-        if (i > 0 && op != getOperand(i - 1))
-            allSame = false;
-    }
-
-    if (!allConstants && !allSame)
-        return this;
-
-    if (allConstants) {
-        SimdConstant cst;
-        switch (type()) {
-          case MIRType::Bool32x4: {
-            int32_t a[4];
-            for (size_t i = 0; i < 4; ++i)
-                a[i] = getOperand(i)->toConstant()->valueToBooleanInfallible() ? -1 : 0;
-            cst = SimdConstant::CreateX4(a);
-            break;
-          }
-          case MIRType::Int32x4: {
-            int32_t a[4];
-            for (size_t i = 0; i < 4; ++i)
-                a[i] = getOperand(i)->toConstant()->toInt32();
-            cst = SimdConstant::CreateX4(a);
-            break;
-          }
-          case MIRType::Float32x4: {
-            float a[4];
-            for (size_t i = 0; i < 4; ++i)
-                a[i] = getOperand(i)->toConstant()->numberToDouble();
-            cst = SimdConstant::CreateX4(a);
-            break;
-          }
-          default: MOZ_CRASH("unexpected type in MSimdValueX4::foldsTo");
-        }
-
-        return MSimdConstant::New(alloc, cst, type());
-    }
-
-    MOZ_ASSERT(allSame);
-    return MSimdSplat::New(alloc, getOperand(0), type());
-}
-
-MDefinition*
-MSimdSplat::foldsTo(TempAllocator& alloc)
-{
-#ifdef DEBUG
-    MIRType laneType = SimdTypeToLaneArgumentType(type());
-#endif
-    MDefinition* op = getOperand(0);
-    if (!op->isConstant())
-        return this;
-    MOZ_ASSERT(op->type() == laneType);
-
-    SimdConstant cst;
-    switch (type()) {
-      case MIRType::Bool8x16: {
-        int8_t v = op->toConstant()->valueToBooleanInfallible() ? -1 : 0;
-        cst = SimdConstant::SplatX16(v);
-        break;
-      }
-      case MIRType::Bool16x8: {
-        int16_t v = op->toConstant()->valueToBooleanInfallible() ? -1 : 0;
-        cst = SimdConstant::SplatX8(v);
-        break;
-      }
-      case MIRType::Bool32x4: {
-        int32_t v = op->toConstant()->valueToBooleanInfallible() ? -1 : 0;
-        cst = SimdConstant::SplatX4(v);
-        break;
-      }
-      case MIRType::Int8x16: {
-        int32_t v = op->toConstant()->toInt32();
-        cst = SimdConstant::SplatX16(v);
-        break;
-      }
-      case MIRType::Int16x8: {
-        int32_t v = op->toConstant()->toInt32();
-        cst = SimdConstant::SplatX8(v);
-        break;
-      }
-      case MIRType::Int32x4: {
-        int32_t v = op->toConstant()->toInt32();
-        cst = SimdConstant::SplatX4(v);
-        break;
-      }
-      case MIRType::Float32x4: {
-        float v = op->toConstant()->numberToDouble();
-        cst = SimdConstant::SplatX4(v);
-        break;
-      }
-      default: MOZ_CRASH("unexpected type in MSimdSplat::foldsTo");
-    }
-
-    return MSimdConstant::New(alloc, cst, type());
-}
-
-MDefinition*
-MSimdUnbox::foldsTo(TempAllocator& alloc)
-{
-    MDefinition* in = input();
-
-    if (in->isSimdBox()) {
-        MSimdBox* box = in->toSimdBox();
-        // If the operand is a MSimdBox, then we just reuse the operand of the
-        // MSimdBox as long as the type corresponds to what we are supposed to
-        // unbox.
-        in = box->input();
-        if (box->simdType() != simdType())
-            return this;
-        MOZ_ASSERT(in->type() == type());
-        return in;
-    }
-
-    return this;
-}
-
-MDefinition*
-MSimdSwizzle::foldsTo(TempAllocator& alloc)
-{
-    if (lanesMatch(0, 1, 2, 3))
-        return input();
-    return this;
-}
-
-MDefinition*
-MSimdGeneralShuffle::foldsTo(TempAllocator& alloc)
-{
-    FixedList<uint8_t> lanes;
-    if (!lanes.init(alloc, numLanes()))
-        return this;
-
-    for (size_t i = 0; i < numLanes(); i++) {
-        if (!lane(i)->isConstant() || lane(i)->type() != MIRType::Int32)
-            return this;
-        int32_t temp = lane(i)->toConstant()->toInt32();
-        if (temp < 0 || unsigned(temp) >= numLanes() * numVectors())
-            return this;
-        lanes[i] = uint8_t(temp);
-    }
-
-    if (numVectors() == 1)
-        return MSimdSwizzle::New(alloc, vector(0), lanes.data());
-
-    MOZ_ASSERT(numVectors() == 2);
-    return MSimdShuffle::New(alloc, vector(0), vector(1), lanes.data());
-}
-
-MInstruction*
-MSimdConvert::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition* obj,
-                           MIRType toType, SimdSign sign, wasm::TrapOffset trapOffset)
-{
-    MIRType fromType = obj->type();
-
-    if (SupportsUint32x4FloatConversions || sign != SimdSign::Unsigned) {
-        MInstruction* ins = New(alloc, obj, toType, sign, trapOffset);
-        addTo->add(ins);
-        return ins;
-    }
-
-    // This architecture can't do Uint32x4 <-> Float32x4 conversions (Hi SSE!)
-    MOZ_ASSERT(sign == SimdSign::Unsigned);
-    if (fromType == MIRType::Int32x4 && toType == MIRType::Float32x4) {
-        // Converting Uint32x4 -> Float32x4. This algorithm is from LLVM.
-        //
-        // Split the input number into high and low parts:
-        //
-        // uint32_t hi = x >> 16;
-        // uint32_t lo = x & 0xffff;
-        //
-        // Insert these parts as the low mantissa bits in a float32 number with
-        // the corresponding exponent:
-        //
-        // float fhi = (bits-as-float)(hi | 0x53000000); // 0x1.0p39f + hi*2^16
-        // float flo = (bits-as-float)(lo | 0x4b000000); // 0x1.0p23f + lo
-        //
-        // Subtract the bias from the hi part:
-        //
-        // fhi -= (0x1.0p39 + 0x1.0p23) // hi*2^16 - 0x1.0p23
-        //
-        // And finally combine:
-        //
-        // result = flo + fhi // lo + hi*2^16.
-
-        // Compute hi = obj >> 16 (lane-wise unsigned shift).
-        MInstruction* c16 = MConstant::New(alloc, Int32Value(16));
-        addTo->add(c16);
-        MInstruction* hi = MSimdShift::AddLegalized(alloc, addTo, obj, c16, MSimdShift::ursh);
-
-        // Compute lo = obj & 0xffff (lane-wise).
-        MInstruction* m16 =
-          MSimdConstant::New(alloc, SimdConstant::SplatX4(0xffff), MIRType::Int32x4);
-        addTo->add(m16);
-        MInstruction* lo = MSimdBinaryBitwise::New(alloc, obj, m16, MSimdBinaryBitwise::and_);
-        addTo->add(lo);
-
-        // Mix in the exponents.
-        MInstruction* exphi =
-          MSimdConstant::New(alloc, SimdConstant::SplatX4(0x53000000), MIRType::Int32x4);
-        addTo->add(exphi);
-        MInstruction* mhi = MSimdBinaryBitwise::New(alloc, hi, exphi, MSimdBinaryBitwise::or_);
-        addTo->add(mhi);
-        MInstruction* explo =
-          MSimdConstant::New(alloc, SimdConstant::SplatX4(0x4b000000), MIRType::Int32x4);
-        addTo->add(explo);
-        MInstruction* mlo = MSimdBinaryBitwise::New(alloc, lo, explo, MSimdBinaryBitwise::or_);
-        addTo->add(mlo);
-
-        // Bit-cast both to Float32x4.
-        MInstruction* fhi = MSimdReinterpretCast::New(alloc, mhi, MIRType::Float32x4);
-        addTo->add(fhi);
-        MInstruction* flo = MSimdReinterpretCast::New(alloc, mlo, MIRType::Float32x4);
-        addTo->add(flo);
-
-        // Subtract out the bias: 0x1.0p39f + 0x1.0p23f.
-        // MSVC doesn't support the hexadecimal float syntax.
-        const float BiasValue = 549755813888.f + 8388608.f;
-        MInstruction* bias =
-          MSimdConstant::New(alloc, SimdConstant::SplatX4(BiasValue), MIRType::Float32x4);
-        addTo->add(bias);
-        MInstruction* fhi_debiased =
-          MSimdBinaryArith::AddLegalized(alloc, addTo, fhi, bias, MSimdBinaryArith::Op_sub);
-
-        // Compute the final result.
-        return MSimdBinaryArith::AddLegalized(alloc, addTo, fhi_debiased, flo,
-                                              MSimdBinaryArith::Op_add);
-    }
-
-    if (fromType == MIRType::Float32x4 && toType == MIRType::Int32x4) {
-        // The Float32x4 -> Uint32x4 conversion can throw if the input is out of
-        // range. This is handled by the LFloat32x4ToUint32x4 expansion.
-        MInstruction* ins = New(alloc, obj, toType, sign, trapOffset);
-        addTo->add(ins);
-        return ins;
-    }
-
-    MOZ_CRASH("Unhandled SIMD type conversion");
-}
-
-MInstruction*
-MSimdBinaryComp::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition* left,
-                              MDefinition* right, Operation op, SimdSign sign)
-{
-    MOZ_ASSERT(left->type() == right->type());
-    MIRType opType = left->type();
-    MOZ_ASSERT(IsSimdType(opType));
-    bool IsEquality = op == equal || op == notEqual;
-
-    // Check if this is an unsupported unsigned compare that needs to be biased.
-    // If so, put the bias vector in `bias`.
-    if (sign == SimdSign::Unsigned && !IsEquality) {
-        MInstruction* bias = nullptr;
-
-        // This is an order comparison of Uint32x4 vectors which are not supported on this target.
-        // Simply offset |left| and |right| by INT_MIN, then do a signed comparison.
-        if (!SupportsUint32x4Compares && opType == MIRType::Int32x4)
-            bias = MSimdConstant::New(alloc, SimdConstant::SplatX4(int32_t(0x80000000)), opType);
-        else if (!SupportsUint16x8Compares && opType == MIRType::Int16x8)
-            bias = MSimdConstant::New(alloc, SimdConstant::SplatX8(int16_t(0x8000)), opType);
-        if (!SupportsUint8x16Compares && opType == MIRType::Int8x16)
-            bias = MSimdConstant::New(alloc, SimdConstant::SplatX16(int8_t(0x80)), opType);
-
-        if (bias) {
-            addTo->add(bias);
-
-            // Add the bias.
-            MInstruction* bleft =
-              MSimdBinaryArith::AddLegalized(alloc, addTo, left, bias, MSimdBinaryArith::Op_add);
-            MInstruction* bright =
-              MSimdBinaryArith::AddLegalized(alloc, addTo, right, bias, MSimdBinaryArith::Op_add);
-
-            // Do the equivalent signed comparison.
-            MInstruction* result =
-              MSimdBinaryComp::New(alloc, bleft, bright, op, SimdSign::Signed);
-            addTo->add(result);
-
-            return result;
-        }
-    }
-
-    if (sign == SimdSign::Unsigned &&
-        ((!SupportsUint32x4Compares && opType == MIRType::Int32x4) ||
-         (!SupportsUint16x8Compares && opType == MIRType::Int16x8) ||
-         (!SupportsUint8x16Compares && opType == MIRType::Int8x16))) {
-        // The sign doesn't matter for equality tests. Flip it to make the
-        // backend assertions happy.
-        MOZ_ASSERT(IsEquality);
-        sign = SimdSign::Signed;
-    }
-
-    // This is a legal operation already. Just create the instruction requested.
-    MInstruction* result = MSimdBinaryComp::New(alloc, left, right, op, sign);
-    addTo->add(result);
-    return result;
-}
-
-MInstruction*
-MSimdBinaryArith::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition* left,
-                               MDefinition* right, Operation op)
-{
-    MOZ_ASSERT(left->type() == right->type());
-    MIRType opType = left->type();
-    MOZ_ASSERT(IsSimdType(opType));
-
-    // SSE does not have 8x16 multiply instructions.
-    if (opType == MIRType::Int8x16 && op == Op_mul) {
-        // Express the multiply in terms of Int16x8 multiplies by handling the
-        // even and odd lanes separately.
-
-        MInstruction* wideL = MSimdReinterpretCast::New(alloc, left, MIRType::Int16x8);
-        addTo->add(wideL);
-        MInstruction* wideR = MSimdReinterpretCast::New(alloc, right, MIRType::Int16x8);
-        addTo->add(wideR);
-
-        // wideL = yyxx yyxx yyxx yyxx yyxx yyxx yyxx yyxx
-        // wideR = bbaa bbaa bbaa bbaa bbaa bbaa bbaa bbaa
-
-        // Shift the odd lanes down to the low bits of the 16x8 vectors.
-        MInstruction* eight = MConstant::New(alloc, Int32Value(8));
-        addTo->add(eight);
-        MInstruction* evenL = wideL;
-        MInstruction* evenR = wideR;
-        MInstruction* oddL =
-          MSimdShift::AddLegalized(alloc, addTo, wideL, eight, MSimdShift::ursh);
-        MInstruction* oddR =
-          MSimdShift::AddLegalized(alloc, addTo, wideR, eight, MSimdShift::ursh);
-
-        // evenL = yyxx yyxx yyxx yyxx yyxx yyxx yyxx yyxx
-        // evenR = bbaa bbaa bbaa bbaa bbaa bbaa bbaa bbaa
-        // oddL  = 00yy 00yy 00yy 00yy 00yy 00yy 00yy 00yy
-        // oddR  = 00bb 00bb 00bb 00bb 00bb 00bb 00bb 00bb
-
-        // Now do two 16x8 multiplications. We can use the low bits of each.
-        MInstruction* even = MSimdBinaryArith::AddLegalized(alloc, addTo, evenL, evenR, Op_mul);
-        MInstruction* odd = MSimdBinaryArith::AddLegalized(alloc, addTo, oddL, oddR, Op_mul);
-
-        // even = ~~PP ~~PP ~~PP ~~PP ~~PP ~~PP ~~PP ~~PP
-        // odd  = ~~QQ ~~QQ ~~QQ ~~QQ ~~QQ ~~QQ ~~QQ ~~QQ
-
-        MInstruction* mask =
-          MSimdConstant::New(alloc, SimdConstant::SplatX8(int16_t(0x00ff)), MIRType::Int16x8);
-        addTo->add(mask);
-        even = MSimdBinaryBitwise::New(alloc, even, mask, MSimdBinaryBitwise::and_);
-        addTo->add(even);
-        odd = MSimdShift::AddLegalized(alloc, addTo, odd, eight, MSimdShift::lsh);
-
-        // even = 00PP 00PP 00PP 00PP 00PP 00PP 00PP 00PP
-        // odd  = QQ00 QQ00 QQ00 QQ00 QQ00 QQ00 QQ00 QQ00
-
-        // Combine:
-        MInstruction* result = MSimdBinaryBitwise::New(alloc, even, odd, MSimdBinaryBitwise::or_);
-        addTo->add(result);
-        result = MSimdReinterpretCast::New(alloc, result, opType);
-        addTo->add(result);
-        return result;
-    }
-
-    // This is a legal operation already. Just create the instruction requested.
-    MInstruction* result = MSimdBinaryArith::New(alloc, left, right, op);
-    addTo->add(result);
-    return result;
-}
-
-MInstruction*
-MSimdShift::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition* left,
-                         MDefinition* right, Operation op)
-{
-    MIRType opType = left->type();
-    MOZ_ASSERT(IsIntegerSimdType(opType));
-
-    // SSE does not provide 8x16 shift instructions.
-    if (opType == MIRType::Int8x16) {
-        // Express the shift in terms of Int16x8 shifts by splitting into even
-        // and odd lanes, place 8-bit lanes into the high bits of Int16x8
-        // vectors `even` and `odd`. Shift, mask, combine.
-        //
-        //   wide = Int16x8.fromInt8x16Bits(left);
-        //   shiftBy = right & 7
-        //   mask = Int16x8.splat(0xff00);
-        //
-        MInstruction* wide = MSimdReinterpretCast::New(alloc, left, MIRType::Int16x8);
-        addTo->add(wide);
-
-        // wide = yyxx yyxx yyxx yyxx yyxx yyxx yyxx yyxx
-
-        MInstruction* shiftMask = MConstant::New(alloc, Int32Value(7));
-        addTo->add(shiftMask);
-        MBinaryBitwiseInstruction* shiftBy = MBitAnd::New(alloc, right, shiftMask);
-        shiftBy->setInt32Specialization();
-        addTo->add(shiftBy);
-
-        // Move the even 8x16 lanes into the high bits of the 16x8 lanes.
-        MInstruction* eight = MConstant::New(alloc, Int32Value(8));
-        addTo->add(eight);
-        MInstruction* even = MSimdShift::AddLegalized(alloc, addTo, wide, eight, lsh);
-
-        // Leave the odd lanes in place.
-        MInstruction* odd = wide;
-
-        // even = xx00 xx00 xx00 xx00 xx00 xx00 xx00 xx00
-        // odd  = yyxx yyxx yyxx yyxx yyxx yyxx yyxx yyxx
-
-        MInstruction* mask =
-          MSimdConstant::New(alloc, SimdConstant::SplatX8(int16_t(0xff00)), MIRType::Int16x8);
-        addTo->add(mask);
-
-        // Left-shift: Clear the low bits in `odd` before shifting.
-        if (op == lsh) {
-            odd = MSimdBinaryBitwise::New(alloc, odd, mask, MSimdBinaryBitwise::and_);
-            addTo->add(odd);
-            // odd  = yy00 yy00 yy00 yy00 yy00 yy00 yy00 yy00
-        }
-
-        // Do the real shift twice: once for the even lanes, once for the odd
-        // lanes. This is a recursive call, but with a different type.
-        even = MSimdShift::AddLegalized(alloc, addTo, even, shiftBy, op);
-        odd = MSimdShift::AddLegalized(alloc, addTo, odd, shiftBy, op);
-
-        // even = XX~~ XX~~ XX~~ XX~~ XX~~ XX~~ XX~~ XX~~
-        // odd  = YY~~ YY~~ YY~~ YY~~ YY~~ YY~~ YY~~ YY~~
-
-        // Right-shift: Clear the low bits in `odd` after shifting.
-        if (op != lsh) {
-            odd = MSimdBinaryBitwise::New(alloc, odd, mask, MSimdBinaryBitwise::and_);
-            addTo->add(odd);
-            // odd  = YY00 YY00 YY00 YY00 YY00 YY00 YY00 YY00
-        }
-
-        // Move the even lanes back to their original place.
-        even = MSimdShift::AddLegalized(alloc, addTo, even, eight, ursh);
-
-        // Now, `odd` contains the odd lanes properly shifted, and `even`
-        // contains the even lanes properly shifted:
-        //
-        // even = 00XX 00XX 00XX 00XX 00XX 00XX 00XX 00XX
-        // odd  = YY00 YY00 YY00 YY00 YY00 YY00 YY00 YY00
-        //
-        // Combine:
-        MInstruction* result = MSimdBinaryBitwise::New(alloc, even, odd, MSimdBinaryBitwise::or_);
-        addTo->add(result);
-        result = MSimdReinterpretCast::New(alloc, result, opType);
-        addTo->add(result);
-        return result;
-    }
-
-    // This is a legal operation already. Just create the instruction requested.
-    MInstruction* result = MSimdShift::New(alloc, left, right, op);
-    addTo->add(result);
-    return result;
-}
-
-template <typename T>
-static void
-PrintOpcodeOperation(T* mir, GenericPrinter& out)
-{
-    mir->MDefinition::printOpcode(out);
-    out.printf(" (%s)", T::OperationName(mir->operation()));
-}
-
-void
-MSimdBinaryArith::printOpcode(GenericPrinter& out) const
-{
-    PrintOpcodeOperation(this, out);
-}
-void
-MSimdBinarySaturating::printOpcode(GenericPrinter& out) const
-{
-    PrintOpcodeOperation(this, out);
-}
-void
-MSimdBinaryBitwise::printOpcode(GenericPrinter& out) const
-{
-    PrintOpcodeOperation(this, out);
-}
-void
-MSimdUnaryArith::printOpcode(GenericPrinter& out) const
-{
-    PrintOpcodeOperation(this, out);
-}
-void
-MSimdBinaryComp::printOpcode(GenericPrinter& out) const
-{
-    PrintOpcodeOperation(this, out);
-}
-void
-MSimdShift::printOpcode(GenericPrinter& out) const
-{
-    PrintOpcodeOperation(this, out);
-}
-
-void
-MSimdInsertElement::printOpcode(GenericPrinter& out) const
-{
-    MDefinition::printOpcode(out);
-    out.printf(" (lane %u)", lane());
-}
-
-void
-MSimdBox::printOpcode(GenericPrinter& out) const
-{
-    MDefinition::printOpcode(out);
-    out.printf(" (%s%s)", SimdTypeToString(simdType()),
-               initialHeap() == gc::TenuredHeap ? ", tenured" : "");
-}
-
-void
-MSimdUnbox::printOpcode(GenericPrinter& out) const
-{
-    MDefinition::printOpcode(out);
-    out.printf(" (%s)", SimdTypeToString(simdType()));
 }
 
 void
@@ -2199,6 +1691,7 @@ MUnbox::printOpcode(GenericPrinter& out) const
       case MIRType::Boolean: out.printf("to Boolean"); break;
       case MIRType::String: out.printf("to String"); break;
       case MIRType::Symbol: out.printf("to Symbol"); break;
+      case MIRType::BigInt: out.printf("to BigInt"); break;
       case MIRType::Object: out.printf("to Object"); break;
       default: break;
     }
@@ -2591,6 +2084,7 @@ jit::TypeSetIncludes(TypeSet* types, MIRType input, TypeSet* inputTypes)
       case MIRType::Float32:
       case MIRType::String:
       case MIRType::Symbol:
+      case MIRType::BigInt:
       case MIRType::MagicOptimizedArguments:
         return types->hasType(TypeSet::PrimitiveType(ValueTypeFromMIRType(input)));
 
@@ -2846,9 +2340,11 @@ void
 MBinaryBitwiseInstruction::infer(BaselineInspector*, jsbytecode*)
 {
     if (getOperand(0)->mightBeType(MIRType::Object) || getOperand(0)->mightBeType(MIRType::Symbol) ||
-        getOperand(1)->mightBeType(MIRType::Object) || getOperand(1)->mightBeType(MIRType::Symbol))
+        getOperand(1)->mightBeType(MIRType::Object) || getOperand(1)->mightBeType(MIRType::Symbol) ||
+        getOperand(1)->mightBeType(MIRType::BigInt))
     {
         specialization_ = MIRType::None;
+        setResultType(MIRType::Value);
     } else {
         specializeAs(MIRType::Int32);
     }
@@ -2858,9 +2354,10 @@ void
 MBinaryBitwiseInstruction::specializeAs(MIRType type)
 {
     MOZ_ASSERT(type == MIRType::Int32 || type == MIRType::Int64);
-    MOZ_ASSERT(this->type() == type);
+    MOZ_ASSERT(this->type() == MIRType::Value || this->type() == type);
 
     specialization_ = type;
+    setResultType(type);
 
     if (isBitOr() || isBitAnd() || isBitXor())
         setCommutative();
@@ -2870,17 +2367,23 @@ void
 MShiftInstruction::infer(BaselineInspector*, jsbytecode*)
 {
     if (getOperand(0)->mightBeType(MIRType::Object) || getOperand(1)->mightBeType(MIRType::Object) ||
-        getOperand(0)->mightBeType(MIRType::Symbol) || getOperand(1)->mightBeType(MIRType::Symbol))
+        getOperand(0)->mightBeType(MIRType::Symbol) || getOperand(1)->mightBeType(MIRType::Symbol) ||
+        getOperand(0)->mightBeType(MIRType::BigInt) || getOperand(1)->mightBeType(MIRType::BigInt))
+    {
         specialization_ = MIRType::None;
-    else
+        setResultType(MIRType::Value);
+    } else {
         specialization_ = MIRType::Int32;
+        setResultType(MIRType::Int32);
+    }
 }
 
 void
 MUrsh::infer(BaselineInspector* inspector, jsbytecode* pc)
 {
     if (getOperand(0)->mightBeType(MIRType::Object) || getOperand(1)->mightBeType(MIRType::Object) ||
-        getOperand(0)->mightBeType(MIRType::Symbol) || getOperand(1)->mightBeType(MIRType::Symbol))
+        getOperand(0)->mightBeType(MIRType::Symbol) || getOperand(1)->mightBeType(MIRType::Symbol) ||
+        getOperand(0)->mightBeType(MIRType::BigInt) || getOperand(1)->mightBeType(MIRType::BigInt))
     {
         specialization_ = MIRType::None;
         setResultType(MIRType::Value);
@@ -2906,7 +2409,7 @@ CanProduceNegativeZero(MDefinition* def)
         case MDefinition::Op_Constant:
             if (def->type() == MIRType::Double && def->toConstant()->toDouble() == -0.0)
                 return true;
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
         case MDefinition::Op_BitAnd:
         case MDefinition::Op_BitOr:
         case MDefinition::Op_BitXor:
@@ -2988,7 +2491,7 @@ NeedNegativeZeroCheck(MDefinition* def)
             if (rhs->id() < lhs->id() && CanProduceNegativeZero(lhs))
                 return true;
 
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
           }
           case MDefinition::Op_StoreElement:
           case MDefinition::Op_StoreElementHole:
@@ -3083,23 +2586,6 @@ MBinaryArithInstruction::New(TempAllocator& alloc, Opcode op,
     }
 }
 
-void
-MBinaryArithInstruction::setNumberSpecialization(TempAllocator& alloc, BaselineInspector* inspector,
-                                                 jsbytecode* pc)
-{
-    setSpecialization(MIRType::Double);
-
-    // Try to specialize as int32.
-    if (getOperand(0)->type() == MIRType::Int32 && getOperand(1)->type() == MIRType::Int32) {
-        bool seenDouble = inspector->hasSeenDoubleResult(pc);
-
-        // Use int32 specialization if the operation doesn't overflow on its
-        // constant operands and if the operation has never overflowed.
-        if (!seenDouble && !constantDoubleResult(alloc))
-            setInt32Specialization();
-    }
-}
-
 bool
 MBinaryArithInstruction::constantDoubleResult(TempAllocator& alloc)
 {
@@ -3132,9 +2618,9 @@ MRsh::foldsTo(TempAllocator& alloc)
 
     switch (shift) {
       case 16:
-        return MSignExtend::New(alloc, lhs->getOperand(0), MSignExtend::Half);
+        return MSignExtendInt32::New(alloc, lhs->getOperand(0), MSignExtendInt32::Half);
       case 24:
-        return MSignExtend::New(alloc, lhs->getOperand(0), MSignExtend::Byte);
+        return MSignExtendInt32::New(alloc, lhs->getOperand(0), MSignExtendInt32::Byte);
     }
 
     return this;
@@ -3828,7 +3314,7 @@ MBitNot::NewInt32(TempAllocator& alloc, MDefinition* input)
 {
     MBitNot* ins = new(alloc) MBitNot(input);
     ins->specialization_ = MIRType::Int32;
-    MOZ_ASSERT(ins->type() == MIRType::Int32);
+    ins->setResultType(MIRType::Int32);
     return ins;
 }
 
@@ -3874,6 +3360,9 @@ MTypeOf::foldsTo(TempAllocator& alloc)
       case MIRType::Symbol:
         type = JSTYPE_SYMBOL;
         break;
+      case MIRType::BigInt:
+        type = JSTYPE_BIGINT;
+        break;
       case MIRType::Null:
         type = JSTYPE_OBJECT;
         break;
@@ -3890,7 +3379,7 @@ MTypeOf::foldsTo(TempAllocator& alloc)
             type = JSTYPE_OBJECT;
             break;
         }
-        MOZ_FALLTHROUGH;
+        [[fallthrough]];
       default:
         return this;
     }
@@ -4160,6 +3649,23 @@ MResumePoint::isRecoverableOperand(MUse* u) const
 }
 
 MDefinition*
+MToNumeric::foldsTo(TempAllocator& alloc)
+{
+    MDefinition* input = getOperand(0);
+
+    if (input->isBox()) {
+        MDefinition* unboxed = input->getOperand(0);
+        if (IsNumericType(unboxed->type())) {
+            // If the argument is an MBox and we can see that it boxes a numeric
+            // value, ToNumeric can be elided.
+            return input;
+        }
+    }
+
+    return this;
+}
+
+MDefinition*
 MToInt32::foldsTo(TempAllocator& alloc)
 {
     MDefinition* input = getOperand(0);
@@ -4290,6 +3796,41 @@ MExtendInt32ToInt64::foldsTo(TempAllocator& alloc)
     if (input->isConstant()) {
         int32_t c = input->toConstant()->toInt32();
         int64_t res = isUnsigned() ? int64_t(uint32_t(c)) : int64_t(c);
+        return MConstant::NewInt64(alloc, res);
+    }
+
+    return this;
+}
+
+MDefinition*
+MSignExtendInt32::foldsTo(TempAllocator& alloc)
+{
+    MDefinition* input = this->input();
+    if (input->isConstant()) {
+        int32_t c = input->toConstant()->toInt32();
+        int32_t res;
+        switch (mode_) {
+          case Byte: res = int32_t(int8_t(c & 0xFF)); break;
+          case Half: res = int32_t(int16_t(c & 0xFFFF)); break;
+        }
+        return MConstant::New(alloc, Int32Value(res));
+    }
+
+    return this;
+}
+
+MDefinition*
+MSignExtendInt64::foldsTo(TempAllocator& alloc)
+{
+    MDefinition* input = this->input();
+    if (input->isConstant()) {
+        int64_t c = input->toConstant()->toInt64();
+        int64_t res;
+        switch (mode_) {
+          case Byte: res = int64_t(int8_t(c & 0xFF)); break;
+          case Half: res = int64_t(int16_t(c & 0xFFFF)); break;
+          case Word: res = int64_t(int32_t(c & 0xFFFFFFFFU)); break;
+        }
         return MConstant::NewInt64(alloc, res);
     }
 
@@ -4450,6 +3991,12 @@ MCompare::tryFoldTypeOf(bool* result)
         }
     } else if (constant->toString() == TypeName(JSTYPE_SYMBOL, names)) {
         if (!typeOf->input()->mightBeType(MIRType::Symbol)) {
+            *result = (jsop() == JSOP_STRICTNE || jsop() == JSOP_NE);
+            return true;
+        }
+    }
+    else if (constant->toString() == TypeName(JSTYPE_BIGINT, names)) {
+        if (!typeOf->input()->mightBeType(MIRType::BigInt)) {
             *result = (jsop() == JSOP_STRICTNE || jsop() == JSOP_NE);
             return true;
         }
@@ -5606,6 +5153,8 @@ MConstant::appendRoots(MRootList& roots) const
         return roots.append(toString());
       case MIRType::Symbol:
         return roots.append(toSymbol());
+      case MIRType::BigInt:
+        return roots.append(toBigInt());
       case MIRType::Object:
         return roots.append(&toObject());
       case MIRType::Undefined:
@@ -5967,7 +5516,14 @@ jit::ElementAccessIsTypedArray(CompilerConstraintList* constraints,
         return false;
 
     *arrayType = types->getTypedArrayType(constraints);
-    return *arrayType != Scalar::MaxTypedArrayViewType;
+
+    // FIXME: https://bugzil.la/1536699
+    if (*arrayType == Scalar::MaxTypedArrayViewType ||
+        Scalar::isBigIntType(*arrayType)) {
+        return false;
+    }
+
+  return true;
 }
 
 bool

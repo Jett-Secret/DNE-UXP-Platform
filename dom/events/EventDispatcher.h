@@ -113,7 +113,8 @@ public:
                        WidgetEvent* aEvent,
                        nsIDOMEvent* aDOMEvent,
                        nsEventStatus aEventStatus,
-                       bool aIsInAnon)
+                       bool aIsInAnon,
+                       dom::EventTarget* aTargetInKnownToBeHandledScope)
     : EventChainVisitor(aPresContext, aEvent, aDOMEvent, aEventStatus)
     , mCanHandle(true)
     , mAutomaticChromeDispatch(true)
@@ -124,10 +125,15 @@ public:
     , mMayHaveListenerManager(true)
     , mWantsPreHandleEvent(false)
     , mRootOfClosedTree(false)
+    , mItemInShadowTree(false)
     , mParentIsSlotInClosedTree(false)
     , mParentIsChromeHandler(false)
+    , mRelatedTargetRetargetedInCurrentScope(false)
+    , mIgnoreBecauseOfShadowDOM(false)
     , mParentTarget(nullptr)
     , mEventTargetAtParent(nullptr)
+    , mRetargetedRelatedTarget(nullptr)
+    , mTargetInKnownToBeHandledScope(aTargetInKnownToBeHandledScope)
   {
   }
 
@@ -142,10 +148,16 @@ public:
     mMayHaveListenerManager = true;
     mWantsPreHandleEvent = false;
     mRootOfClosedTree = false;
+    mItemInShadowTree = false;
     mParentIsSlotInClosedTree = false;
     mParentIsChromeHandler = false;
+    // Note, we don't clear mRelatedTargetRetargetedInCurrentScope explicitly,
+    // since it is used during event path creation to indicate whether
+    // relatedTarget may need to be retargeted.
+    mIgnoreBecauseOfShadowDOM = false;
     mParentTarget = nullptr;
     mEventTargetAtParent = nullptr;
+    mRetargetedRelatedTarget = nullptr;
   }
 
   dom::EventTarget* GetParentTarget()
@@ -159,6 +171,14 @@ public:
     if (mParentTarget) {
       mParentIsChromeHandler = aIsChromeHandler;
     }
+  }
+
+  void IgnoreCurrentTargetBecauseOfShadowDOMRetargeting()
+  {
+    mCanHandle = false;
+    mIgnoreBecauseOfShadowDOM = true;
+    SetParentTarget(nullptr, false);
+    mEventTargetAtParent = nullptr;
   }
 
   /**
@@ -219,6 +239,12 @@ public:
   bool mRootOfClosedTree;
 
   /**
+   * If target is node and its root is a shadow root.
+   * https://dom.spec.whatwg.org/#event-path-item-in-shadow-tree
+   */
+  bool mItemInShadowTree;
+
+  /**
    * True if mParentTarget is HTMLSlotElement in a closed shadow tree and the
    * current target is assigned to that slot.
    */
@@ -228,6 +254,19 @@ public:
    * True if mParentTarget is a chrome handler in the event path.
    */
   bool mParentIsChromeHandler;
+
+  /**
+   * True if event's related target has been already retargeted in the
+   * current 'scope'. This should be set to false initially and whenever
+   * event path creation crosses shadow boundary.
+   */
+  bool mRelatedTargetRetargetedInCurrentScope;
+
+  /**
+   * True if Shadow DOM relatedTarget retargeting causes the current item
+   * to not show up in the event path.
+   */
+  bool mIgnoreBecauseOfShadowDOM;
 
 private:
   /**
@@ -241,6 +280,19 @@ public:
    * which should be used when the event is handled at mParentTarget.
    */
   dom::EventTarget* mEventTargetAtParent;
+
+  /**
+   * If the related target of the event needs to be retargeted, set this
+   * to a new EventTarget.
+   */
+  dom::EventTarget* mRetargetedRelatedTarget;
+
+  /**
+   * Set to the value of mEvent->mTarget of the previous scope in case of
+   * Shadow DOM or such, and if there is no anonymous content this just points
+   * to the initial target.
+   */
+  dom::EventTarget* mTargetInKnownToBeHandledScope;
 };
 
 class EventChainPostVisitor : public mozilla::EventChainVisitor

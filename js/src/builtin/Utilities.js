@@ -23,6 +23,7 @@
 */
 
 #include "SelfHostingDefines.h"
+#include "TypedObjectConstants.h"
 
 // Assertions and debug printing, defined here instead of in the header above
 // to make `assert` invisible to C++.
@@ -50,6 +51,8 @@
 // Do not create an alias to a self-hosted builtin, otherwise it will be cloned
 // twice.
 //
+// Symbol is a bare constructor without properties or methods.
+var std_Symbol = Symbol;
 // WeakMap is a bare constructor without properties or methods.
 var std_WeakMap = WeakMap;
 // StopIteration is a bare constructor without properties or methods.
@@ -76,12 +79,6 @@ MakeConstructible(Record, {});
 
 
 /********** Abstract operations defined in ECMAScript Language Specification **********/
-
-
-/* Spec: ECMAScript Language Specification, 5.1 edition, 8.12.6 and 11.8.7 */
-function HasProperty(o, p) {
-    return p in o;
-}
 
 
 /* Spec: ECMAScript Language Specification, 5.1 edition, 9.2 and 11.4.9 */
@@ -218,6 +215,15 @@ function SpeciesConstructor(obj, defaultConstructor) {
 function GetTypeError(msg) {
     try {
         FUN_APPLY(ThrowTypeError, undefined, arguments);
+    } catch (e) {
+        return e;
+    }
+    assert(false, "the catch block should've returned from this function.");
+}
+
+function GetAggregateError(msg) {
+    try {
+        FUN_APPLY(ThrowAggregateError, undefined, arguments);
     } catch (e) {
         return e;
     }

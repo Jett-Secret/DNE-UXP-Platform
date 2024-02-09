@@ -9,6 +9,8 @@
 #include "mozilla/Range.h"
 #include "mozilla/ScopeExit.h"
 
+#include "builtin/BigInt.h"
+
 #include "jsarray.h"
 #include "jsatom.h"
 #include "jscntxt.h"
@@ -275,10 +277,15 @@ PreprocessValue(JSContext* cx, HandleObject holder, KeyType key, MutableHandleVa
 
     RootedString keyStr(cx);
 
-    /* Step 2. */
-    if (vp.isObject()) {
+  // Step 2. Modified by BigInt spec 6.1 to check for a toJSON method on the
+  // BigInt prototype when the value is a BigInt.
+  if (vp.isObject() || vp.isBigInt()) {
         RootedValue toJSON(cx);
-        RootedObject obj(cx, &vp.toObject());
+        RootedObject obj(cx, JS::ToObject(cx, vp));
+        if (!obj) {
+          return false;
+        }
+
         if (!GetProperty(cx, obj, obj, cx->names().toJSON, &toJSON))
             return false;
 
@@ -328,6 +335,8 @@ PreprocessValue(JSContext* cx, HandleObject holder, KeyType key, MutableHandleVa
         } else if (cls == ESClass::Boolean) {
             if (!Unbox(cx, obj, vp))
                 return false;
+        } else if (cls == ESClass::BigInt) {
+            vp.setBigInt(obj->as<BigIntObject>().unbox());
         }
     }
 
@@ -624,6 +633,12 @@ Str(JSContext* cx, const Value& v, StringifyContext* scx)
         }
 
         return NumberValueToStringBuffer(cx, v, scx->sb);
+    }
+
+    /* Step 10 in the BigInt proposal. */
+    if (v.isBigInt()) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BIGINT_NOT_SERIALIZABLE);
+        return false;
     }
 
     /* Step 10. */

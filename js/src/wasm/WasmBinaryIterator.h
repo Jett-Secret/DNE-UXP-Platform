@@ -1,6 +1,7 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
  *
  * Copyright 2016 Mozilla Foundation
+ * Copyright 2023 Moonchild Productions
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,13 +49,6 @@ enum class OpKind {
     I64,
     F32,
     F64,
-    I8x16,
-    I16x8,
-    I32x4,
-    F32x4,
-    B8x16,
-    B16x8,
-    B32x4,
     Br,
     BrIf,
     BrTable,
@@ -93,11 +87,6 @@ enum class OpKind {
     Swizzle,
     Shuffle,
     Splat,
-    SimdSelect,
-    SimdCtor,
-    SimdBooleanReduction,
-    SimdShiftByScalar,
-    SimdComparison,
 };
 
 // Return the OpKind for a given Op. This is used for sanity-checking that
@@ -271,80 +260,56 @@ class MOZ_STACK_CLASS OpIter : private Policy
     DebugOnly<Op> op_;
     size_t offsetOfExpr_;
 
-    MOZ_MUST_USE bool readFixedU8(uint8_t* out) {
+    [[nodiscard]] bool readFixedU8(uint8_t* out) {
         if (Validate)
             return d_.readFixedU8(out);
         *out = d_.uncheckedReadFixedU8();
         return true;
     }
-    MOZ_MUST_USE bool readFixedU32(uint32_t* out) {
+    [[nodiscard]] bool readFixedU32(uint32_t* out) {
         if (Validate)
             return d_.readFixedU32(out);
         *out = d_.uncheckedReadFixedU32();
         return true;
     }
-    MOZ_MUST_USE bool readVarS32(int32_t* out) {
+    [[nodiscard]] bool readVarS32(int32_t* out) {
         if (Validate)
             return d_.readVarS32(out);
         *out = d_.uncheckedReadVarS32();
         return true;
     }
-    MOZ_MUST_USE bool readVarU32(uint32_t* out) {
+    [[nodiscard]] bool readVarU32(uint32_t* out) {
         if (Validate)
             return d_.readVarU32(out);
         *out = d_.uncheckedReadVarU32();
         return true;
     }
-    MOZ_MUST_USE bool readVarS64(int64_t* out) {
+    [[nodiscard]] bool readVarS64(int64_t* out) {
         if (Validate)
             return d_.readVarS64(out);
         *out = d_.uncheckedReadVarS64();
         return true;
     }
-    MOZ_MUST_USE bool readVarU64(uint64_t* out) {
+    [[nodiscard]] bool readVarU64(uint64_t* out) {
         if (Validate)
             return d_.readVarU64(out);
         *out = d_.uncheckedReadVarU64();
         return true;
     }
-    MOZ_MUST_USE bool readFixedF32(RawF32* out) {
+    [[nodiscard]] bool readFixedF32(RawF32* out) {
         if (Validate)
             return d_.readFixedF32(out);
         *out = d_.uncheckedReadFixedF32();
         return true;
     }
-    MOZ_MUST_USE bool readFixedF64(RawF64* out) {
+    [[nodiscard]] bool readFixedF64(RawF64* out) {
         if (Validate)
             return d_.readFixedF64(out);
         *out = d_.uncheckedReadFixedF64();
         return true;
     }
-    MOZ_MUST_USE bool readFixedI8x16(I8x16* out) {
-        if (Validate)
-            return d_.readFixedI8x16(out);
-        d_.uncheckedReadFixedI8x16(out);
-        return true;
-    }
-    MOZ_MUST_USE bool readFixedI16x8(I16x8* out) {
-        if (Validate)
-            return d_.readFixedI16x8(out);
-        d_.uncheckedReadFixedI16x8(out);
-        return true;
-    }
-    MOZ_MUST_USE bool readFixedI32x4(I32x4* out) {
-        if (Validate)
-            return d_.readFixedI32x4(out);
-        d_.uncheckedReadFixedI32x4(out);
-        return true;
-    }
-    MOZ_MUST_USE bool readFixedF32x4(F32x4* out) {
-        if (Validate)
-            return d_.readFixedF32x4(out);
-        d_.uncheckedReadFixedF32x4(out);
-        return true;
-    }
 
-    MOZ_MUST_USE bool readAtomicViewType(Scalar::Type* viewType) {
+    [[nodiscard]] bool readAtomicViewType(Scalar::Type* viewType) {
         uint8_t x;
         if (!readFixedU8(&x))
             return fail("unable to read atomic view");
@@ -354,7 +319,7 @@ class MOZ_STACK_CLASS OpIter : private Policy
         return true;
     }
 
-    MOZ_MUST_USE bool readAtomicBinOpOp(jit::AtomicOp* op) {
+    [[nodiscard]] bool readAtomicBinOpOp(jit::AtomicOp* op) {
         uint8_t x;
         if (!readFixedU8(&x))
             return fail("unable to read atomic opcode");
@@ -374,23 +339,23 @@ class MOZ_STACK_CLASS OpIter : private Policy
         return true;
     }
 
-    MOZ_MUST_USE bool readLinearMemoryAddress(uint32_t byteSize, LinearMemoryAddress<Value>* addr);
-    MOZ_MUST_USE bool readBlockType(ExprType* expr);
+    [[nodiscard]] bool readLinearMemoryAddress(uint32_t byteSize, LinearMemoryAddress<Value>* addr);
+    [[nodiscard]] bool readBlockType(ExprType* expr);
 
-    MOZ_MUST_USE bool typeMismatch(ExprType actual, ExprType expected) MOZ_COLD;
-    MOZ_MUST_USE bool checkType(ValType actual, ValType expected);
-    MOZ_MUST_USE bool checkType(ExprType actual, ExprType expected);
+    [[nodiscard]] bool typeMismatch(ExprType actual, ExprType expected) MOZ_COLD;
+    [[nodiscard]] bool checkType(ValType actual, ValType expected);
+    [[nodiscard]] bool checkType(ExprType actual, ExprType expected);
 
-    MOZ_MUST_USE bool pushControl(LabelKind kind, ExprType type, bool reachable);
-    MOZ_MUST_USE bool mergeControl(LabelKind* kind, ExprType* type, Value* value);
-    MOZ_MUST_USE bool popControl(LabelKind* kind, ExprType* type, Value* value);
+    [[nodiscard]] bool pushControl(LabelKind kind, ExprType type, bool reachable);
+    [[nodiscard]] bool mergeControl(LabelKind* kind, ExprType* type, Value* value);
+    [[nodiscard]] bool popControl(LabelKind* kind, ExprType* type, Value* value);
 
-    MOZ_MUST_USE bool push(ValType t) {
+    [[nodiscard]] bool push(ValType t) {
         if (MOZ_UNLIKELY(!reachable_))
             return true;
         return valueStack_.emplaceBack(t);
     }
-    MOZ_MUST_USE bool push(TypeAndValue<Value> tv) {
+    [[nodiscard]] bool push(TypeAndValue<Value> tv) {
         if (MOZ_UNLIKELY(!reachable_))
             return true;
         return valueStack_.append(tv);
@@ -407,7 +372,7 @@ class MOZ_STACK_CLASS OpIter : private Policy
     }
 
     // Test whether reading the top of the value stack is currently valid.
-    MOZ_MUST_USE bool checkTop() {
+    [[nodiscard]] bool checkTop() {
         MOZ_ASSERT(reachable_);
         if (Validate && valueStack_.length() <= controlStack_.back().valueStackStart()) {
             if (valueStack_.empty())
@@ -418,7 +383,7 @@ class MOZ_STACK_CLASS OpIter : private Policy
     }
 
     // Pop the top of the value stack.
-    MOZ_MUST_USE bool pop(TypeAndValue<Value>* tv) {
+    [[nodiscard]] bool pop(TypeAndValue<Value>* tv) {
         if (MOZ_UNLIKELY(!reachable_))
             return true;
         if (!checkTop())
@@ -428,7 +393,7 @@ class MOZ_STACK_CLASS OpIter : private Policy
     }
 
     // Pop the top of the value stack and check that it has the given type.
-    MOZ_MUST_USE bool popWithType(ValType expectedType, Value* value) {
+    [[nodiscard]] bool popWithType(ValType expectedType, Value* value) {
         if (MOZ_UNLIKELY(!reachable_))
             return true;
         if (!checkTop())
@@ -442,7 +407,7 @@ class MOZ_STACK_CLASS OpIter : private Policy
     }
 
     // Pop the top of the value stack and discard the result.
-    MOZ_MUST_USE bool pop() {
+    [[nodiscard]] bool pop() {
         if (MOZ_UNLIKELY(!reachable_))
             return true;
         if (!checkTop())
@@ -452,7 +417,7 @@ class MOZ_STACK_CLASS OpIter : private Policy
     }
 
     // Read the top of the value stack (without popping it).
-    MOZ_MUST_USE bool top(TypeAndValue<Value>* tv) {
+    [[nodiscard]] bool top(TypeAndValue<Value>* tv) {
         if (MOZ_UNLIKELY(!reachable_))
             return true;
         if (!checkTop())
@@ -463,7 +428,7 @@ class MOZ_STACK_CLASS OpIter : private Policy
 
     // Read the top of the value stack (without popping it) and check that it
     // has the given type.
-    MOZ_MUST_USE bool topWithType(ValType expectedType, Value* value) {
+    [[nodiscard]] bool topWithType(ValType expectedType, Value* value) {
         if (MOZ_UNLIKELY(!reachable_))
             return true;
         if (!checkTop())
@@ -477,7 +442,7 @@ class MOZ_STACK_CLASS OpIter : private Policy
     }
 
     // Read the value stack entry at depth |index|.
-    MOZ_MUST_USE bool peek(uint32_t index, TypeAndValue<Value>* tv) {
+    [[nodiscard]] bool peek(uint32_t index, TypeAndValue<Value>* tv) {
         MOZ_ASSERT(reachable_);
         if (Validate && valueStack_.length() - controlStack_.back().valueStackStart() < index)
             return fail("peeking at value from outside block");
@@ -519,13 +484,13 @@ class MOZ_STACK_CLASS OpIter : private Policy
     bool done() const { return d_.done(); }
 
     // Report a general failure.
-    MOZ_MUST_USE bool fail(const char* msg) MOZ_COLD;
+    [[nodiscard]] bool fail(const char* msg) MOZ_COLD;
 
     // Report an unimplemented feature.
-    MOZ_MUST_USE bool notYetImplemented(const char* what) MOZ_COLD;
+    [[nodiscard]] bool notYetImplemented(const char* what) MOZ_COLD;
 
     // Report an unrecognized opcode.
-    MOZ_MUST_USE bool unrecognizedOpcode(uint32_t expr) MOZ_COLD;
+    [[nodiscard]] bool unrecognizedOpcode(uint32_t expr) MOZ_COLD;
 
     // Test whether the iterator is currently in "reachable" code.
     bool inReachableCode() const { return reachable_; }
@@ -533,100 +498,72 @@ class MOZ_STACK_CLASS OpIter : private Policy
     // ------------------------------------------------------------------------
     // Decoding and validation interface.
 
-    MOZ_MUST_USE bool readOp(uint16_t* op);
-    MOZ_MUST_USE bool readFunctionStart(ExprType ret);
-    MOZ_MUST_USE bool readFunctionEnd();
-    MOZ_MUST_USE bool readReturn(Value* value);
-    MOZ_MUST_USE bool readBlock();
-    MOZ_MUST_USE bool readLoop();
-    MOZ_MUST_USE bool readIf(Value* condition);
-    MOZ_MUST_USE bool readElse(ExprType* thenType, Value* thenValue);
-    MOZ_MUST_USE bool readEnd(LabelKind* kind, ExprType* type, Value* value);
-    MOZ_MUST_USE bool readBr(uint32_t* relativeDepth, ExprType* type, Value* value);
-    MOZ_MUST_USE bool readBrIf(uint32_t* relativeDepth, ExprType* type,
+    [[nodiscard]] bool readOp(uint16_t* op);
+    [[nodiscard]] bool readFunctionStart(ExprType ret);
+    [[nodiscard]] bool readFunctionEnd();
+    [[nodiscard]] bool readReturn(Value* value);
+    [[nodiscard]] bool readBlock();
+    [[nodiscard]] bool readLoop();
+    [[nodiscard]] bool readIf(Value* condition);
+    [[nodiscard]] bool readElse(ExprType* thenType, Value* thenValue);
+    [[nodiscard]] bool readEnd(LabelKind* kind, ExprType* type, Value* value);
+    [[nodiscard]] bool readBr(uint32_t* relativeDepth, ExprType* type, Value* value);
+    [[nodiscard]] bool readBrIf(uint32_t* relativeDepth, ExprType* type,
                                Value* value, Value* condition);
-    MOZ_MUST_USE bool readBrTable(uint32_t* tableLength, ExprType* type,
+    [[nodiscard]] bool readBrTable(uint32_t* tableLength, ExprType* type,
                                   Value* value, Value* index);
-    MOZ_MUST_USE bool readBrTableEntry(ExprType* type, Value* value, uint32_t* depth);
-    MOZ_MUST_USE bool readBrTableDefault(ExprType* type, Value* value, uint32_t* depth);
-    MOZ_MUST_USE bool readUnreachable();
-    MOZ_MUST_USE bool readDrop();
-    MOZ_MUST_USE bool readUnary(ValType operandType, Value* input);
-    MOZ_MUST_USE bool readConversion(ValType operandType, ValType resultType, Value* input);
-    MOZ_MUST_USE bool readBinary(ValType operandType, Value* lhs, Value* rhs);
-    MOZ_MUST_USE bool readComparison(ValType operandType, Value* lhs, Value* rhs);
-    MOZ_MUST_USE bool readLoad(ValType resultType, uint32_t byteSize,
+    [[nodiscard]] bool readBrTableEntry(ExprType* type, Value* value, uint32_t* depth);
+    [[nodiscard]] bool readBrTableDefault(ExprType* type, Value* value, uint32_t* depth);
+    [[nodiscard]] bool readUnreachable();
+    [[nodiscard]] bool readDrop();
+    [[nodiscard]] bool readUnary(ValType operandType, Value* input);
+    [[nodiscard]] bool readConversion(ValType operandType, ValType resultType, Value* input);
+    [[nodiscard]] bool readBinary(ValType operandType, Value* lhs, Value* rhs);
+    [[nodiscard]] bool readComparison(ValType operandType, Value* lhs, Value* rhs);
+    [[nodiscard]] bool readLoad(ValType resultType, uint32_t byteSize,
                                LinearMemoryAddress<Value>* addr);
-    MOZ_MUST_USE bool readStore(ValType resultType, uint32_t byteSize,
+    [[nodiscard]] bool readStore(ValType resultType, uint32_t byteSize,
                                 LinearMemoryAddress<Value>* addr, Value* value);
-    MOZ_MUST_USE bool readTeeStore(ValType resultType, uint32_t byteSize,
+    [[nodiscard]] bool readTeeStore(ValType resultType, uint32_t byteSize,
                                    LinearMemoryAddress<Value>* addr, Value* value);
-    MOZ_MUST_USE bool readNop();
-    MOZ_MUST_USE bool readCurrentMemory();
-    MOZ_MUST_USE bool readGrowMemory(Value* input);
-    MOZ_MUST_USE bool readSelect(ValType* type,
+    [[nodiscard]] bool readNop();
+    [[nodiscard]] bool readCurrentMemory();
+    [[nodiscard]] bool readGrowMemory(Value* input);
+    [[nodiscard]] bool readSelect(ValType* type,
                                  Value* trueValue, Value* falseValue, Value* condition);
-    MOZ_MUST_USE bool readGetLocal(const ValTypeVector& locals, uint32_t* id);
-    MOZ_MUST_USE bool readSetLocal(const ValTypeVector& locals, uint32_t* id, Value* value);
-    MOZ_MUST_USE bool readTeeLocal(const ValTypeVector& locals, uint32_t* id, Value* value);
-    MOZ_MUST_USE bool readGetGlobal(const GlobalDescVector& globals, uint32_t* id);
-    MOZ_MUST_USE bool readSetGlobal(const GlobalDescVector& globals, uint32_t* id, Value* value);
-    MOZ_MUST_USE bool readTeeGlobal(const GlobalDescVector& globals, uint32_t* id, Value* value);
-    MOZ_MUST_USE bool readI32Const(int32_t* i32);
-    MOZ_MUST_USE bool readI64Const(int64_t* i64);
-    MOZ_MUST_USE bool readF32Const(RawF32* f32);
-    MOZ_MUST_USE bool readF64Const(RawF64* f64);
-    MOZ_MUST_USE bool readI8x16Const(I8x16* i8x16);
-    MOZ_MUST_USE bool readI16x8Const(I16x8* i16x8);
-    MOZ_MUST_USE bool readI32x4Const(I32x4* i32x4);
-    MOZ_MUST_USE bool readF32x4Const(F32x4* f32x4);
-    MOZ_MUST_USE bool readB8x16Const(I8x16* i8x16);
-    MOZ_MUST_USE bool readB16x8Const(I16x8* i16x8);
-    MOZ_MUST_USE bool readB32x4Const(I32x4* i32x4);
-    MOZ_MUST_USE bool readCall(uint32_t* calleeIndex);
-    MOZ_MUST_USE bool readCallIndirect(uint32_t* sigIndex, Value* callee);
-    MOZ_MUST_USE bool readOldCallIndirect(uint32_t* sigIndex);
-    MOZ_MUST_USE bool readCallArg(ValType type, uint32_t numArgs, uint32_t argIndex, Value* arg);
-    MOZ_MUST_USE bool readCallArgsEnd(uint32_t numArgs);
-    MOZ_MUST_USE bool readOldCallIndirectCallee(Value* callee);
-    MOZ_MUST_USE bool readCallReturn(ExprType ret);
-    MOZ_MUST_USE bool readAtomicLoad(LinearMemoryAddress<Value>* addr,
+    [[nodiscard]] bool readGetLocal(const ValTypeVector& locals, uint32_t* id);
+    [[nodiscard]] bool readSetLocal(const ValTypeVector& locals, uint32_t* id, Value* value);
+    [[nodiscard]] bool readTeeLocal(const ValTypeVector& locals, uint32_t* id, Value* value);
+    [[nodiscard]] bool readGetGlobal(const GlobalDescVector& globals, uint32_t* id);
+    [[nodiscard]] bool readSetGlobal(const GlobalDescVector& globals, uint32_t* id, Value* value);
+    [[nodiscard]] bool readTeeGlobal(const GlobalDescVector& globals, uint32_t* id, Value* value);
+    [[nodiscard]] bool readI32Const(int32_t* i32);
+    [[nodiscard]] bool readI64Const(int64_t* i64);
+    [[nodiscard]] bool readF32Const(RawF32* f32);
+    [[nodiscard]] bool readF64Const(RawF64* f64);
+    [[nodiscard]] bool readCall(uint32_t* calleeIndex);
+    [[nodiscard]] bool readCallIndirect(uint32_t* sigIndex, Value* callee);
+    [[nodiscard]] bool readOldCallIndirect(uint32_t* sigIndex);
+    [[nodiscard]] bool readCallArg(ValType type, uint32_t numArgs, uint32_t argIndex, Value* arg);
+    [[nodiscard]] bool readCallArgsEnd(uint32_t numArgs);
+    [[nodiscard]] bool readOldCallIndirectCallee(Value* callee);
+    [[nodiscard]] bool readCallReturn(ExprType ret);
+    [[nodiscard]] bool readAtomicLoad(LinearMemoryAddress<Value>* addr,
                                      Scalar::Type* viewType);
-    MOZ_MUST_USE bool readAtomicStore(LinearMemoryAddress<Value>* addr,
+    [[nodiscard]] bool readAtomicStore(LinearMemoryAddress<Value>* addr,
                                       Scalar::Type* viewType,
                                       Value* value);
-    MOZ_MUST_USE bool readAtomicBinOp(LinearMemoryAddress<Value>* addr,
+    [[nodiscard]] bool readAtomicBinOp(LinearMemoryAddress<Value>* addr,
                                       Scalar::Type* viewType,
                                       jit::AtomicOp* op,
                                       Value* value);
-    MOZ_MUST_USE bool readAtomicCompareExchange(LinearMemoryAddress<Value>* addr,
+    [[nodiscard]] bool readAtomicCompareExchange(LinearMemoryAddress<Value>* addr,
                                                 Scalar::Type* viewType,
                                                 Value* oldValue,
                                                 Value* newValue);
-    MOZ_MUST_USE bool readAtomicExchange(LinearMemoryAddress<Value>* addr,
+    [[nodiscard]] bool readAtomicExchange(LinearMemoryAddress<Value>* addr,
                                          Scalar::Type* viewType,
                                          Value* newValue);
-    MOZ_MUST_USE bool readSimdComparison(ValType simdType, Value* lhs,
-                                         Value* rhs);
-    MOZ_MUST_USE bool readSimdShiftByScalar(ValType simdType, Value* lhs,
-                                            Value* rhs);
-    MOZ_MUST_USE bool readSimdBooleanReduction(ValType simdType, Value* input);
-    MOZ_MUST_USE bool readExtractLane(ValType simdType, uint8_t* lane,
-                                      Value* vector);
-    MOZ_MUST_USE bool readReplaceLane(ValType simdType, uint8_t* lane,
-                                      Value* vector, Value* scalar);
-    MOZ_MUST_USE bool readSplat(ValType simdType, Value* scalar);
-    MOZ_MUST_USE bool readSwizzle(ValType simdType, uint8_t (* lanes)[16], Value* vector);
-    MOZ_MUST_USE bool readShuffle(ValType simdType, uint8_t (* lanes)[16],
-                                  Value* lhs, Value* rhs);
-    MOZ_MUST_USE bool readSimdSelect(ValType simdType, Value* trueValue,
-                                     Value* falseValue,
-                                     Value* condition);
-    MOZ_MUST_USE bool readSimdCtor();
-    MOZ_MUST_USE bool readSimdCtorArg(ValType elementType, uint32_t numElements, uint32_t argIndex,
-                                      Value* arg);
-    MOZ_MUST_USE bool readSimdCtorArgsEnd(uint32_t numElements);
-    MOZ_MUST_USE bool readSimdCtorReturn(ValType simdType);
 
     // At a location where readOp is allowed, peek at the next opcode
     // without consuming it or updating any internal state.
@@ -827,13 +764,6 @@ OpIter<Policy>::readBlockType(ExprType* type)
           case uint8_t(ExprType::I64):
           case uint8_t(ExprType::F32):
           case uint8_t(ExprType::F64):
-          case uint8_t(ExprType::I8x16):
-          case uint8_t(ExprType::I16x8):
-          case uint8_t(ExprType::I32x4):
-          case uint8_t(ExprType::F32x4):
-          case uint8_t(ExprType::B8x16):
-          case uint8_t(ExprType::B16x8):
-          case uint8_t(ExprType::B32x4):
             break;
           default:
             return fail("invalid inline block type");
@@ -1649,118 +1579,6 @@ OpIter<Policy>::readF64Const(RawF64* f64)
 
 template <typename Policy>
 inline bool
-OpIter<Policy>::readI8x16Const(I8x16* i8x16)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::I8x16);
-
-    I8x16 unused;
-    if (!readFixedI8x16(Output ? i8x16 : &unused))
-        return false;
-
-    if (!push(ValType::I8x16))
-        return false;
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readI16x8Const(I16x8* i16x8)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::I16x8);
-
-    I16x8 unused;
-    if (!readFixedI16x8(Output ? i16x8 : &unused))
-        return false;
-
-    if (!push(ValType::I16x8))
-        return false;
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readI32x4Const(I32x4* i32x4)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::I32x4);
-
-    I32x4 unused;
-    if (!readFixedI32x4(Output ? i32x4 : &unused))
-        return false;
-
-    if (!push(ValType::I32x4))
-        return false;
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readF32x4Const(F32x4* f32x4)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::F32x4);
-
-    F32x4 unused;
-    if (!readFixedF32x4(Output ? f32x4 : &unused))
-        return false;
-
-    if (!push(ValType::F32x4))
-        return false;
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readB8x16Const(I8x16* i8x16)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::B8x16);
-
-    I8x16 unused;
-    if (!readFixedI8x16(Output ? i8x16 : &unused))
-        return false;
-
-    if (!push(ValType::B8x16))
-        return false;
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readB16x8Const(I16x8* i16x8)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::B16x8);
-
-    I16x8 unused;
-    if (!readFixedI16x8(Output ? i16x8 : &unused))
-        return false;
-
-    if (!push(ValType::B16x8))
-        return false;
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readB32x4Const(I32x4* i32x4)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::B32x4);
-
-    I32x4 unused;
-    if (!readFixedI32x4(Output ? i32x4 : &unused))
-        return false;
-
-    if (!push(ValType::B32x4))
-        return false;
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
 OpIter<Policy>::readCall(uint32_t* calleeIndex)
 {
     MOZ_ASSERT(Classify(op_) == OpKind::Call);
@@ -1997,239 +1815,6 @@ OpIter<Policy>::readAtomicExchange(LinearMemoryAddress<Value>* addr, Scalar::Typ
     return true;
 }
 
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSimdComparison(ValType simdType, Value* lhs, Value* rhs)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::SimdComparison);
-
-    if (!popWithType(simdType, rhs))
-        return false;
-
-    if (!popWithType(simdType, lhs))
-        return false;
-
-    infalliblePush(SimdBoolType(simdType));
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSimdShiftByScalar(ValType simdType, Value* lhs, Value* rhs)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::SimdShiftByScalar);
-
-    if (!popWithType(ValType::I32, rhs))
-        return false;
-
-    if (!popWithType(simdType, lhs))
-        return false;
-
-    infalliblePush(simdType);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSimdBooleanReduction(ValType simdType, Value* input)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::SimdBooleanReduction);
-
-    if (!popWithType(simdType, input))
-        return false;
-
-    infalliblePush(ValType::I32);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readExtractLane(ValType simdType, uint8_t* lane, Value* vector)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::ExtractLane);
-
-    uint32_t laneBits;
-    if (!readVarU32(&laneBits))
-        return false;
-
-    if (Validate && laneBits >= NumSimdElements(simdType))
-        return fail("simd lane out of bounds for simd type");
-
-    if (!popWithType(simdType, vector))
-        return false;
-
-    infalliblePush(SimdElementType(simdType));
-
-    if (Output)
-        *lane = uint8_t(laneBits);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readReplaceLane(ValType simdType, uint8_t* lane, Value* vector, Value* scalar)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::ReplaceLane);
-
-    uint32_t laneBits;
-    if (!readVarU32(&laneBits))
-        return false;
-
-    if (Validate && laneBits >= NumSimdElements(simdType))
-        return fail("simd lane out of bounds for simd type");
-
-    if (!popWithType(SimdElementType(simdType), scalar))
-        return false;
-
-    if (!popWithType(simdType, vector))
-        return false;
-
-    infalliblePush(simdType);
-
-    if (Output)
-        *lane = uint8_t(laneBits);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSplat(ValType simdType, Value* scalar)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::Splat);
-
-    if (!popWithType(SimdElementType(simdType), scalar))
-        return false;
-
-    infalliblePush(simdType);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSwizzle(ValType simdType, uint8_t (* lanes)[16], Value* vector)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::Swizzle);
-
-    uint32_t numSimdLanes = NumSimdElements(simdType);
-    MOZ_ASSERT(numSimdLanes <= mozilla::ArrayLength(*lanes));
-    for (uint32_t i = 0; i < numSimdLanes; ++i) {
-        uint8_t validateLane;
-        if (!readFixedU8(Output ? &(*lanes)[i] : &validateLane))
-            return fail("unable to read swizzle lane");
-        if (Validate && (Output ? (*lanes)[i] : validateLane) >= numSimdLanes)
-            return fail("swizzle index out of bounds");
-    }
-
-    if (!popWithType(simdType, vector))
-        return false;
-
-    infalliblePush(simdType);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readShuffle(ValType simdType, uint8_t (* lanes)[16], Value* lhs, Value* rhs)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::Shuffle);
-
-    uint32_t numSimdLanes = NumSimdElements(simdType);
-    MOZ_ASSERT(numSimdLanes <= mozilla::ArrayLength(*lanes));
-    for (uint32_t i = 0; i < numSimdLanes; ++i) {
-        uint8_t validateLane;
-        if (!readFixedU8(Output ? &(*lanes)[i] : &validateLane))
-            return fail("unable to read shuffle lane");
-        if (Validate && (Output ? (*lanes)[i] : validateLane) >= numSimdLanes * 2)
-            return fail("shuffle index out of bounds");
-    }
-
-    if (!popWithType(simdType, rhs))
-        return false;
-
-    if (!popWithType(simdType, lhs))
-        return false;
-
-    infalliblePush(simdType);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSimdSelect(ValType simdType, Value* trueValue, Value* falseValue,
-                               Value* condition)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::SimdSelect);
-
-    if (!popWithType(simdType, falseValue))
-        return false;
-    if (!popWithType(simdType, trueValue))
-        return false;
-    if (!popWithType(SimdBoolType(simdType), condition))
-        return false;
-
-    infalliblePush(simdType);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSimdCtor()
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::SimdCtor);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSimdCtorArg(ValType elementType, uint32_t numElements, uint32_t index,
-                                Value* arg)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::SimdCtor);
-    MOZ_ASSERT(numElements > 0);
-
-    TypeAndValue<Value> tv;
-
-    if (!peek(numElements - index, &tv))
-        return false;
-    if (!checkType(tv.type(), elementType))
-        return false;
-
-    *arg = tv.value();
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSimdCtorArgsEnd(uint32_t numElements)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::SimdCtor);
-    MOZ_ASSERT(numElements <= valueStack_.length());
-
-    valueStack_.shrinkBy(numElements);
-
-    return true;
-}
-
-template <typename Policy>
-inline bool
-OpIter<Policy>::readSimdCtorReturn(ValType simdType)
-{
-    MOZ_ASSERT(Classify(op_) == OpKind::SimdCtor);
-
-    infalliblePush(simdType);
-
-    return true;
-}
 
 } // namespace wasm
 } // namespace js

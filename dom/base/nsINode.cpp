@@ -273,6 +273,18 @@ nsINode* nsINode::GetRootNode(const GetRootNodeOptions& aOptions)
   return SubtreeRoot();
 }
 
+// TODO: was marked as constant.
+nsINode*
+nsINode::GetParentOrHostNode()
+{
+  if (mParent) {
+    return mParent;
+  }
+
+  ShadowRoot* shadowRoot = ShadowRoot::FromNode(this);
+  return shadowRoot ? shadowRoot->GetHost() : nullptr;
+}
+
 nsINode*
 nsINode::SubtreeRoot() const
 {
@@ -1543,32 +1555,25 @@ nsINode::SetExplicitBaseURI(nsIURI* aURI)
   return rv;
 }
 
-static nsresult
-AdoptNodeIntoOwnerDoc(nsINode *aParent, nsINode *aNode)
+static void
+AdoptNodeIntoOwnerDoc(nsINode *aParent, nsINode *aNode, ErrorResult& aError)
 {
   NS_ASSERTION(!aNode->GetParentNode(),
                "Should have removed from parent already");
 
   nsIDocument *doc = aParent->OwnerDoc();
 
-  nsresult rv;
-  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(doc, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DebugOnly<nsINode*> adoptedNode = doc->AdoptNode(*aNode, aError);
 
-  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIDOMNode> adoptedNode;
-  rv = domDoc->AdoptNode(node, getter_AddRefs(adoptedNode));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  NS_ASSERTION(aParent->OwnerDoc() == doc,
-               "ownerDoc chainged while adopting");
-  NS_ASSERTION(adoptedNode == node, "Uh, adopt node changed nodes?");
-  NS_ASSERTION(aParent->OwnerDoc() == aNode->OwnerDoc(),
+#ifdef DEBUG
+  if (!aError.Failed()) {
+    MOZ_ASSERT(aParent->OwnerDoc() == doc,
+               "ownerDoc changed while adopting");
+    MOZ_ASSERT(adoptedNode == aNode, "Uh, adopt node changed nodes?");
+    MOZ_ASSERT(aParent->OwnerDoc() == aNode->OwnerDoc(),
                "ownerDocument changed again after adopting!");
-
-  return NS_OK;
+  }
+#endif // DEBUG
 }
 
 static nsresult
@@ -1593,19 +1598,20 @@ ReparentWrappersInSubtree(nsIContent* aRoot)
 
   rootedGlobal = xpc::GetXBLScope(cx, rootedGlobal);
 
-  nsresult rv;
+  ErrorResult rv;
   JS::Rooted<JSObject*> reflector(cx);
   for (nsIContent* cur = aRoot; cur; cur = cur->GetNextNode(aRoot)) {
     if ((reflector = cur->GetWrapper())) {
       JSAutoCompartment ac(cx, reflector);
-      rv = ReparentWrapper(cx, reflector);
-      if NS_FAILED(rv) {
+      ReparentWrapper(cx, reflector, rv);
+      rv.WouldReportJSException();
+      if (rv.Failed()) {
         // We _could_ consider BlastSubtreeToPieces here, but it's not really
         // needed.  Having some nodes in here accessible to content while others
         // are not is probably OK.  We just need to fail out of the actual
         // insertion, so they're not in the DOM.  Returning a failure here will
         // do that.
-        return rv;
+        return rv.StealNSResult();
       }
     }
   }
@@ -1619,7 +1625,6 @@ nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
 {
   NS_PRECONDITION(!aKid->GetParentNode(),
                   "Inserting node that already has parent");
-  nsresult rv;
 
   // The id-handling code, and in the future possibly other code, need to
   // react to unexpected attribute changes.
@@ -1630,15 +1635,23 @@ nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
   mozAutoDocUpdate updateBatch(GetComposedDoc(), UPDATE_CONTENT_MODEL, aNotify);
 
   if (OwnerDoc() != aKid->OwnerDoc()) {
-    rv = AdoptNodeIntoOwnerDoc(this, aKid);
-    NS_ENSURE_SUCCESS(rv, rv);
+    ErrorResult error;
+    AdoptNodeIntoOwnerDoc(this, aKid, error);
+
+    // Need to WouldReportJSException() if our callee can throw a JS
+    // exception (which it can) and we're neither propagating the
+    // error out nor unconditionally suppressing it.
+    error.WouldReportJSException();
+    if (NS_WARN_IF(error.Failed())) {
+      return error.StealNSResult();
+    }
   }
 
   uint32_t childCount = aChildArray.ChildCount();
   NS_ENSURE_TRUE(aIndex <= childCount, NS_ERROR_ILLEGAL_VALUE);
   bool isAppend = (aIndex == childCount);
 
-  rv = aChildArray.InsertChildAt(aKid, aIndex);
+  nsresult rv = aChildArray.InsertChildAt(aKid, aIndex);
   NS_ENSURE_SUCCESS(rv, rv);
   if (aIndex == 0) {
     mFirstChild = aKid;
@@ -1948,6 +1961,40 @@ nsINode::Append(const Sequence<OwningNodeOrString>& aNodes,
   }
 
   AppendChild(*node, aRv);
+}
+
+// https://dom.spec.whatwg.org/#dom-parentnode-replacechildren
+void nsINode::ReplaceChildren(const Sequence<OwningNodeOrString>& aNodes,
+                              ErrorResult& aRv) {
+  nsCOMPtr<nsIDocument> doc = OwnerDoc();
+  nsCOMPtr<nsINode> node = ConvertNodesOrStringsIntoNode(aNodes, doc, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  EnsurePreInsertionValidity(*node, nullptr, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  // Needed when used in combination with contenteditable (maybe)
+  mozAutoDocUpdate updateBatch(doc, UPDATE_CONTENT_MODEL, true);
+
+  nsAutoMutationBatch mb(this, true, false);
+
+  // Replace all with node within this.
+  while (mFirstChild) {
+    int32_t index = IndexOf(mFirstChild);
+    if (index == -1) {
+      NS_ASSERTION(index != -1, "First child must have an index");
+      return;
+    }
+    RemoveChildAt(index, true);
+  }
+  mb.RemovalDone();
+
+  AppendChild(*node, aRv);
+  mb.NodesAdded();
 }
 
 void
@@ -2475,7 +2522,7 @@ nsINode::ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
   // inserting them w/o calling AdoptNode().
   nsIDocument* doc = OwnerDoc();
   if (doc != newContent->OwnerDoc()) {
-    aError = AdoptNodeIntoOwnerDoc(this, aNewChild);
+    AdoptNodeIntoOwnerDoc(this, aNewChild, aError);
     if (aError.Failed()) {
       return nullptr;
     }
@@ -2879,9 +2926,9 @@ FindMatchingElementsWithId(const nsAString& aId, nsINode* aRoot,
       // We have an element with the right id and it's a strict descendant
       // of aRoot.  Make sure it really matches the selector.
       if (!aMatchInfo ||
-          nsCSSRuleProcessor::SelectorListMatches(element,
-                                                  aMatchInfo->mMatchContext,
-                                                  aMatchInfo->mSelectorList)) {
+          nsCSSRuleProcessor::RestrictedSelectorListMatches(element,
+                                                            aMatchInfo->mMatchContext,
+                                                            aMatchInfo->mSelectorList)) {
         aList.AppendElement(element);
         if (onlyFirstMatch) {
           return;
@@ -2932,9 +2979,9 @@ FindMatchingElements(nsINode* aRoot, nsCSSSelectorList* aSelectorList, T &aList,
        cur;
        cur = cur->GetNextNode(aRoot)) {
     if (cur->IsElement() &&
-        nsCSSRuleProcessor::SelectorListMatches(cur->AsElement(),
-                                                matchingContext,
-                                                aSelectorList)) {
+        nsCSSRuleProcessor::RestrictedSelectorListMatches(cur->AsElement(),
+                                                          matchingContext,
+                                                          aSelectorList)) {
       if (onlyFirstMatch) {
         aList.AppendElement(cur->AsElement());
         return;
@@ -3072,9 +3119,7 @@ nsINode::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 already_AddRefed<nsINode>
 nsINode::CloneNode(bool aDeep, ErrorResult& aError)
 {
-  nsCOMPtr<nsINode> result;
-  aError = nsNodeUtils::CloneNodeImpl(this, aDeep, getter_AddRefs(result));
-  return result.forget();
+  return nsNodeUtils::CloneNodeImpl(this, aDeep, aError);
 }
 
 nsDOMAttributeMap*

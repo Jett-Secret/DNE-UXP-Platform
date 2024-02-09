@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=4 sw=4 sts=4 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -230,7 +229,8 @@ nsTextBoxFrame::UpdateAttributes(nsIAtom*         aAttribute,
     if (aAttribute == nullptr || aAttribute == nsGkAtoms::crop) {
         static nsIContent::AttrValuesArray strings[] =
           {&nsGkAtoms::left, &nsGkAtoms::start, &nsGkAtoms::center,
-           &nsGkAtoms::right, &nsGkAtoms::end, &nsGkAtoms::none, nullptr};
+           &nsGkAtoms::right, &nsGkAtoms::end, &nsGkAtoms::none,
+           &nsGkAtoms::clip, nullptr};
         CroppingStyle cropType;
         switch (mContent->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::crop,
                                           strings, eCaseMatters)) {
@@ -247,6 +247,9 @@ nsTextBoxFrame::UpdateAttributes(nsIAtom*         aAttribute,
             break;
           case 5:
             cropType = CropNone;
+            break;
+          case 6:
+            cropType = CropClip;
             break;
           default:
             cropType = CropAuto;
@@ -625,6 +628,10 @@ nsTextBoxFrame::CalculateTitleForWidth(nsRenderingContext& aRenderingContext,
 {
     DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
 
+    if (mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::_is_cropped)) {
+        mContent->UnsetAttr(kNameSpaceID_None, nsGkAtoms::_is_cropped, true);
+    }
+
     if (mTitle.IsEmpty()) {
         mCroppedTitle.Truncate();
         return 0;
@@ -647,7 +654,9 @@ nsTextBoxFrame::CalculateTitleForWidth(nsRenderingContext& aRenderingContext,
     }
 
     const nsDependentString& kEllipsis = nsContentUtils::GetLocalizedEllipsis();
-    if (mCropType != CropNone) {
+    if (mCropType == CropClip) {
+      mCroppedTitle.Truncate();
+    } else if (mCropType != CropNone) {
       // start with an ellipsis
       mCroppedTitle.Assign(kEllipsis);
 
@@ -681,6 +690,7 @@ nsTextBoxFrame::CalculateTitleForWidth(nsRenderingContext& aRenderingContext,
         case CropAuto:
         case CropNone:
         case CropRight:
+        case CropClip:
         {
             ClusterIterator iter(mTitle.Data(), mTitle.Length());
             const char16_t* dataBegin = iter;
@@ -823,6 +833,9 @@ nsTextBoxFrame::CalculateTitleForWidth(nsRenderingContext& aRenderingContext,
         }
         break;
     }
+
+    mContent->SetAttr(kNameSpaceID_None, nsGkAtoms::_is_cropped,
+                      NS_LITERAL_STRING("true"), true);
 
     return nsLayoutUtils::AppUnitWidthOfStringBidi(mCroppedTitle, this, *fm,
                                                    aRenderingContext);

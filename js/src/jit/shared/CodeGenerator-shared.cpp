@@ -85,17 +85,10 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph, Mac
         MOZ_ASSERT(graph->argumentSlotCount() == 0);
         frameDepth_ += gen->wasmMaxStackArgBytes();
 
-        if (gen->usesSimd()) {
-            // If the function uses any SIMD then we may need to insert padding
-            // so that local slots are aligned for SIMD.
-            frameInitialAdjustment_ = ComputeByteAlignment(sizeof(wasm::Frame),
-                                                           WasmStackAlignment);
-            frameDepth_ += frameInitialAdjustment_;
-            // Keep the stack aligned. Some SIMD sequences build values on the
-            // stack and need the stack aligned.
-            frameDepth_ += ComputeByteAlignment(sizeof(wasm::Frame) + frameDepth_,
-                                                WasmStackAlignment);
-        } else if (gen->performsCall()) {
+        static_assert(!SupportsSimd, "we need padding so that local slots are SIMD-aligned and "
+                                     "the stack must be kept SIMD-aligned too.");
+
+        if (gen->performsCall()) {
             // An MWasmCall does not align the stack pointer at calls sites but
             // instead relies on the a priori stack adjustment. This must be the
             // last adjustment of frameDepth_.
@@ -431,6 +424,7 @@ CodeGeneratorShared::encodeAllocation(LSnapshot* snapshot, MDefinition* mir,
       case MIRType::Int32:
       case MIRType::String:
       case MIRType::Symbol:
+      case MIRType::BigInt:
       case MIRType::Object:
       case MIRType::ObjectOrNull:
       case MIRType::Boolean:
@@ -1112,7 +1106,6 @@ CodeGeneratorShared::ensureOsiSpace()
     }
     MOZ_ASSERT_IF(!masm.oom(),
                   masm.currentOffset() - lastOsiPointOffset_ >= Assembler::PatchWrite_NearCallSize());
-    lastOsiPointOffset_ = masm.currentOffset();
 }
 
 uint32_t
@@ -1124,6 +1117,7 @@ CodeGeneratorShared::markOsiPoint(LOsiPoint* ins)
     uint32_t offset = masm.currentOffset();
     SnapshotOffset so = ins->snapshot()->snapshotOffset();
     masm.propagateOOM(osiIndices_.append(OsiIndex(offset, so)));
+    lastOsiPointOffset_ = offset;
 
     return offset;
 }
@@ -1646,7 +1640,7 @@ CodeGeneratorShared::jumpToBlock(MBasicBlock* mir, Assembler::Condition cond)
 }
 #endif
 
-MOZ_MUST_USE bool
+[[nodiscard]] bool
 CodeGeneratorShared::addCacheLocations(const CacheLocationList& locs, size_t* numLocs,
                                        size_t* curIndex)
 {

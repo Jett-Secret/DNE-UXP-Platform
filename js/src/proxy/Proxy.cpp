@@ -488,10 +488,10 @@ Proxy::fun_toString(JSContext* cx, HandleObject proxy, bool isToSource)
 }
 
 bool
-Proxy::regexp_toShared(JSContext* cx, HandleObject proxy, RegExpGuard* g)
+Proxy::regexp_toShared(JSContext* cx, HandleObject proxy, MutableHandleRegExpShared shared)
 {
     JS_CHECK_RECURSION(cx, return false);
-    return proxy->as<ProxyObject>().handler()->regexp_toShared(cx, proxy, g);
+    return proxy->as<ProxyObject>().handler()->regexp_toShared(cx, proxy, shared);
 }
 
 bool
@@ -663,24 +663,6 @@ bool
 js::proxy_HasInstance(JSContext* cx, HandleObject proxy, MutableHandleValue v, bool* bp)
 {
     return Proxy::hasInstance(cx, proxy, v, bp);
-}
-
-bool
-js::proxy_Call(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    RootedObject proxy(cx, &args.callee());
-    MOZ_ASSERT(proxy->is<ProxyObject>());
-    return Proxy::call(cx, proxy, args);
-}
-
-bool
-js::proxy_Construct(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    RootedObject proxy(cx, &args.callee());
-    MOZ_ASSERT(proxy->is<ProxyObject>());
-    return Proxy::construct(cx, proxy, args);
 }
 
 bool

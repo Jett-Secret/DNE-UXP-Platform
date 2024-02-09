@@ -50,6 +50,7 @@ class PropertyResult;
 class Symbol;
 enum class SymbolCode: uint32_t;
 
+class BigInt;
 } // namespace JS
 
 // Do the importing.
@@ -82,9 +83,17 @@ using JS::UTF8CharsZ;
 using JS::UniqueChars;
 using JS::UniqueTwoByteChars;
 
+using JS::Result;
+using JS::Ok;
+using JS::OOM;
+
 using JS::AutoValueVector;
 using JS::AutoIdVector;
 using JS::AutoObjectVector;
+
+using JS::RootedValueVector;
+using JS::HandleValueVector;
+using JS::MutableHandleValueVector;
 
 using JS::ValueVector;
 using JS::IdVector;
@@ -114,6 +123,7 @@ using JS::RootedObject;
 using JS::RootedScript;
 using JS::RootedString;
 using JS::RootedSymbol;
+using JS::RootedBigInt;
 using JS::RootedValue;
 
 using JS::PersistentRooted;
@@ -123,6 +133,7 @@ using JS::PersistentRootedObject;
 using JS::PersistentRootedScript;
 using JS::PersistentRootedString;
 using JS::PersistentRootedSymbol;
+using JS::PersistentRootedBigInt;
 using JS::PersistentRootedValue;
 
 using JS::Handle;
@@ -132,6 +143,7 @@ using JS::HandleObject;
 using JS::HandleScript;
 using JS::HandleString;
 using JS::HandleSymbol;
+using JS::HandleBigInt;
 using JS::HandleValue;
 
 using JS::MutableHandle;
@@ -141,6 +153,7 @@ using JS::MutableHandleObject;
 using JS::MutableHandleScript;
 using JS::MutableHandleString;
 using JS::MutableHandleSymbol;
+using JS::MutableHandleBigInt;
 using JS::MutableHandleValue;
 
 using JS::NullHandleValue;
@@ -158,6 +171,7 @@ using JS::Zone;
 using JS::Symbol;
 using JS::SymbolCode;
 
+using JS::BigInt;
 } /* namespace js */
 
 #endif /* NamespaceImports_h */

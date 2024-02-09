@@ -22,6 +22,8 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/EventTargetBinding.h"
+#include "mozilla/dom/ModuleScript.h"
+#include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/TouchEvent.h"
 #include "mozilla/TimelineConsumers.h"
 #include "mozilla/EventTimelineMarker.h"
@@ -784,28 +786,22 @@ EventListenerManager::SetEventHandler(nsIAtom* aName,
     rv = doc->NodePrincipal()->GetCsp(getter_AddRefs(csp));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (csp) {
-      // let's generate a script sample and pass it as aContent,
-      // it will not match the hash, but allows us to pass
-      // the script sample in aContent.
-      nsAutoString scriptSample, attr, tagName(NS_LITERAL_STRING("UNKNOWN"));
-      aName->ToString(attr);
-      nsCOMPtr<nsIDOMNode> domNode(do_QueryInterface(mTarget));
-      if (domNode) {
-        domNode->GetNodeName(tagName);
-      }
-      // build a "script sample" based on what we know about this element
-      scriptSample.Assign(attr);
-      scriptSample.AppendLiteral(" attribute on ");
-      scriptSample.Append(tagName);
-      scriptSample.AppendLiteral(" element");
+    unsigned lineNum = 0;
+    unsigned columnNum = 0;
 
+    JSContext* cx = nsContentUtils::GetCurrentJSContext();
+    if (cx && !JS::DescribeScriptedCaller(cx, nullptr, &lineNum, &columnNum)) {
+      JS_ClearPendingException(cx);
+    }
+
+    if (csp) {
       bool allowsInlineScript = true;
       rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_SCRIPT,
                                 EmptyString(), // aNonce
                                 true, // aParserCreated (true because attribute event handler)
-                                scriptSample,
-                                0,             // aLineNumber
+                                aBody,
+                                lineNum,             // aLineNumber
+                                columnNum,           // aColumnNumber
                                 &allowsInlineScript);
       NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1018,6 +1014,15 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
   NS_ENSURE_SUCCESS(result, result);
   NS_ENSURE_TRUE(handler, NS_ERROR_FAILURE);
 
+  JS::Rooted<JSFunction*> func(cx, JS_GetObjectFunction(handler));
+  MOZ_ASSERT(func);
+  JS::Rooted<JSScript*> jsScript(cx, JS_GetFunctionScript(cx, func));
+  MOZ_ASSERT(jsScript);
+  RefPtr<LoadedScript> loaderScript = ScriptLoader::GetActiveScript(cx);
+  if (loaderScript) {
+    loaderScript->AssociateWithScript(jsScript);
+  }
+
   if (jsEventHandler->EventName() == nsGkAtoms::onerror && win) {
     RefPtr<OnErrorEventHandlerNonNull> handlerCallback =
       new OnErrorEventHandlerNonNull(nullptr, handler, /* aIncumbentGlobal = */ nullptr);
@@ -1053,12 +1058,8 @@ EventListenerManager::HandleEventSubType(Listener* aListener,
   }
 
   if (NS_SUCCEEDED(result)) {
-    if (mIsMainThreadELM) {
-      CycleCollectedJSContext* ccjs = CycleCollectedJSContext::Get();
-      if (ccjs) {
-        ccjs->EnterMicroTask();
-      }
-    }
+    nsAutoMicroTask mt;
+
     // nsIDOMEvent::currentTarget is set in EventDispatcher.
     if (listenerHolder.HasWebIDLCallback()) {
       ErrorResult rv;
@@ -1067,12 +1068,6 @@ EventListenerManager::HandleEventSubType(Listener* aListener,
       result = rv.StealNSResult();
     } else {
       result = listenerHolder.GetXPCOMCallback()->HandleEvent(aDOMEvent);
-    }
-    if (mIsMainThreadELM) {
-      CycleCollectedJSContext* ccjs = CycleCollectedJSContext::Get();
-      if (ccjs) {
-        ccjs->LeaveMicroTask();
-      }
     }
   }
 
@@ -1120,6 +1115,38 @@ EventListenerManager::GetLegacyEventMessage(EventMessage aEventMessage) const
   }
 }
 
+already_AddRefed<nsPIDOMWindowInner>
+EventListenerManager::WindowFromListener(Listener* aListener,
+                                         bool aItemInShadowTree)
+{
+  nsCOMPtr<nsPIDOMWindowInner> innerWindow;
+  if (!aItemInShadowTree) {
+    if (aListener->mListener.HasWebIDLCallback()) {
+      CallbackObject* callback = aListener->mListener.GetWebIDLCallback();
+      nsGlobalWindow* win;
+      if (callback) {
+        // Find the real underlying callback.
+        JSObject* realCallback =
+          js::UncheckedUnwrap(callback->CallbackPreserveColor());
+        // Get the global for this callback.
+        win = mIsMainThreadELM ?
+              xpc::WindowGlobalOrNull(realCallback) :
+              nullptr;
+      }
+      if (win && win->IsInnerWindow()) {
+        innerWindow = win->AsInner(); // Can be nullptr
+      }
+    } else {
+      // Can't get the global from
+      // listener->mListener.GetXPCOMCallback().
+      // In most cases, it would be the same as for
+      // the target, so let's do that.
+      innerWindow = GetInnerWindowForTarget(); // Can be nullptr
+    }
+  }
+  return innerWindow.forget();
+}
+
 /**
 * Causes a check for event listeners and processing by them if they exist.
 * @param an event listener
@@ -1130,7 +1157,8 @@ EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
                                           WidgetEvent* aEvent,
                                           nsIDOMEvent** aDOMEvent,
                                           EventTarget* aCurrentTarget,
-                                          nsEventStatus* aEventStatus)
+                                          nsEventStatus* aEventStatus,
+                                          bool aItemInShadowTree)
 {
   //Set the value of the internal PreventDefault flag properly based on aEventStatus
   if (!aEvent->DefaultPrevented() &&
@@ -1222,8 +1250,17 @@ EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
               listener = listenerHolder.ptr();
               hasRemovedListener = true;
             }
+            nsCOMPtr<nsPIDOMWindowInner> innerWindow =
+              WindowFromListener(listener, aItemInShadowTree);
+            nsIDOMEvent* oldWindowEvent = nullptr;
+            if (innerWindow) {
+              oldWindowEvent = innerWindow->SetEvent(*aDOMEvent);
+            }
             if (NS_FAILED(HandleEventSubType(listener, *aDOMEvent, aCurrentTarget))) {
               aEvent->mFlags.mExceptionWasRaised = true;
+            }
+            if (innerWindow) {
+              Unused << innerWindow->SetEvent(oldWindowEvent);
             }
             aEvent->mFlags.mInPassiveListener = false;
 

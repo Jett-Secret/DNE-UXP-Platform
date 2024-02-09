@@ -7,6 +7,8 @@
 #include "mozilla/LinkedList.h"
 
 #include "nsCORSListenerProxy.h"
+
+#include "nsQueryObject.h"
 #include "nsIChannel.h"
 #include "nsIHttpChannel.h"
 #include "HttpChannelChild.h"
@@ -1038,13 +1040,6 @@ nsCORSListenerProxy::CheckPreflightNeeded(nsIChannel* aChannel, UpdateType aUpda
     return NS_OK;
   }
 
-  // A preflight is needed. But if we've already been cross-site, then
-  // we already did a preflight when that happened, and so we're not allowed
-  // to do another preflight again.
-  if (aUpdateType != UpdateType::InternalOrHSTSRedirect) {
-    NS_ENSURE_FALSE(mHasBeenCrossSite, NS_ERROR_DOM_BAD_URI);
-  }
-
   nsCOMPtr<nsIHttpChannelInternal> internal = do_QueryInterface(http);
   NS_ENSURE_TRUE(internal, NS_ERROR_DOM_BAD_URI);
 
@@ -1344,7 +1339,7 @@ nsCORSPreflightListener::CheckPreflightRequestApproved(nsIRequest* aRequest)
                           headerVal);
   nsTArray<nsCString> headers;
   nsCCharSeparatedTokenizer headerTokens(headerVal, ',');
-  bool allowAllHeaders = false;
+  bool wildcard = false;
   while(headerTokens.hasMoreTokens()) {
     const nsDependentCSubstring& header = headerTokens.nextToken();
     if (header.IsEmpty()) {
@@ -1356,19 +1351,31 @@ nsCORSPreflightListener::CheckPreflightRequestApproved(nsIRequest* aRequest)
       return NS_ERROR_DOM_BAD_URI;
     }
     if (header.EqualsLiteral("*") && !mWithCredentials) {
-      allowAllHeaders = true;
+      wildcard = true;
     } else {
       headers.AppendElement(header);
     }
   }
-  if (!allowAllHeaders) {
-    for (uint32_t i = 0; i < mPreflightHeaders.Length(); ++i) {
-      if (!headers.Contains(mPreflightHeaders[i],
-                            nsCaseInsensitiveCStringArrayComparator())) {
-        LogBlockedRequest(aRequest, "CORSMissingAllowHeaderFromPreflight",
-                          NS_ConvertUTF8toUTF16(mPreflightHeaders[i]).get());
-        return NS_ERROR_DOM_BAD_URI;
-      }
+  for (uint32_t i = 0; i < mPreflightHeaders.Length(); ++i) {
+    if (wildcard
+        // Access-Control-Allow-Headers is '*', so we should skip these checks.
+#if 0
+        && !mPreflightHeaders[i].LowerCaseEqualsASCII("authorization")
+        // However, according to the spec, 'Authorization' isn't allowed to be
+        // wildcarded here and must always be explicitly mentioned.
+        // Fixme: Mainstream keeps this disabled because nobody obeys this rule.
+        //        This should be flipped on when either mainstream does or when there's enough
+        //        effort to make websites adhere to the spec, to keep our implementation
+        //        in line with the consensus on the web.
+#endif
+        ) {
+      continue;
+    }
+    if (!headers.Contains(mPreflightHeaders[i],
+                          nsCaseInsensitiveCStringArrayComparator())) {
+      LogBlockedRequest(aRequest, "CORSMissingAllowHeaderFromPreflight",
+                        NS_ConvertUTF8toUTF16(mPreflightHeaders[i]).get());
+      return NS_ERROR_DOM_BAD_URI;
     }
   }
 
@@ -1502,6 +1509,9 @@ nsCORSListenerProxy::StartCORSPreflight(nsIChannel* aRequestChannel,
                      method, false);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  RefPtr<nsIHttpChannel> reqCh = do_QueryObject(aRequestChannel);
+  RefPtr<nsIHttpChannel> preCh = do_QueryObject(preHttp);
+
   nsTArray<nsCString> preflightHeaders;
   if (!aUnsafeHeaders.IsEmpty()) {
     for (uint32_t i = 0; i < aUnsafeHeaders.Length(); ++i) {
@@ -1529,6 +1539,23 @@ nsCORSListenerProxy::StartCORSPreflight(nsIChannel* aRequestChannel,
 
   rv = preflightChannel->SetNotificationCallbacks(preflightListener);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  if (reqCh && preCh) {
+    // Per https://fetch.spec.whatwg.org/#cors-preflight-fetch step 1, the
+    // request's referrer and referrer policy should match the original request.
+    // Note that RFC 9110 says we SHOULD NOT send referrers on insecure requests
+    // which CORS preflights by definition are, so there's a conflict here, but
+    // since this is expected behaviour in mainstream implementations, we get and
+    // send the referrer on CORS preflights here. See issue #2451
+    uint32_t referrerPolicy = nsIHttpChannel::REFERRER_POLICY_UNSET;
+    rv = reqCh->GetReferrerPolicy(&referrerPolicy);
+    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIURI> requestReferrerURI;
+    rv = reqCh->GetReferrer(getter_AddRefs(requestReferrerURI));
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = preCh->SetReferrerWithPolicy(requestReferrerURI, referrerPolicy);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
 
   // Start preflight
   rv = preflightChannel->AsyncOpen2(preflightListener);

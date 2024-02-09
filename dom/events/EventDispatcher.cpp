@@ -204,6 +204,16 @@ public:
     mNewTarget = aNewTarget;
   }
 
+  EventTarget* GetRetargetedRelatedTarget()
+  {
+    return mRetargetedRelatedTarget;
+  }
+
+  void SetRetargetedRelatedTarget(EventTarget* aTarget)
+  {
+    mRetargetedRelatedTarget = aTarget;
+  }
+
   void SetForceContentDispatch(bool aForce)
   {
     mFlags.mForceContentDispatch = aForce;
@@ -252,6 +262,16 @@ public:
   bool IsRootOfClosedTree()
   {
     return mFlags.mRootOfClosedTree;
+  }
+
+  void SetItemInShadowTree(bool aSet)
+  {
+    mFlags.mItemInShadowTree = aSet;
+  }
+
+  bool IsItemInShadowTree()
+  {
+    return mFlags.mItemInShadowTree;
   }
 
   void SetIsSlotInClosedTree(bool aSet)
@@ -341,7 +361,8 @@ public:
       mManager->HandleEvent(aVisitor.mPresContext, aVisitor.mEvent,
                             &aVisitor.mDOMEvent,
                             CurrentTarget(),
-                            &aVisitor.mEventStatus);
+                            &aVisitor.mEventStatus,
+                            IsItemInShadowTree());
       NS_ASSERTION(aVisitor.mEvent->mCurrentTarget == nullptr,
                    "CurrentTarget should be null!");
     }
@@ -354,6 +375,7 @@ public:
 
 private:
   nsCOMPtr<EventTarget>             mTarget;
+  nsCOMPtr<EventTarget>             mRetargetedRelatedTarget;
 
   class EventTargetChainFlags
   {
@@ -373,6 +395,7 @@ private:
     bool mWantsPreHandleEvent : 1;
     bool mPreHandleEventOnly : 1;
     bool mRootOfClosedTree : 1;
+    bool mItemInShadowTree : 1;
     bool mIsSlotInClosedTree : 1;
     bool mIsChromeHandler : 1;
   private:
@@ -422,6 +445,8 @@ EventTargetChainItem::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   SetWantsPreHandleEvent(aVisitor.mWantsPreHandleEvent);
   SetPreHandleEventOnly(aVisitor.mWantsPreHandleEvent && !aVisitor.mCanHandle);
   SetRootOfClosedTree(aVisitor.mRootOfClosedTree);
+  SetItemInShadowTree(aVisitor.mItemInShadowTree);
+  SetRetargetedRelatedTarget(aVisitor.mRetargetedRelatedTarget);
   mItemFlags = aVisitor.mItemFlags;
   mItemData = aVisitor.mItemData;
 }
@@ -454,6 +479,7 @@ EventTargetChainItem::HandleEventTargetChain(
 {
   // Save the target so that it can be restored later.
   nsCOMPtr<EventTarget> firstTarget = aVisitor.mEvent->mTarget;
+  nsCOMPtr<EventTarget> firstRelatedTarget = aVisitor.mEvent->mRelatedTarget;
   uint32_t chainLength = aChain.Length();
   uint32_t firstCanHandleEventTargetIdx =
     EventTargetChainItem::GetFirstCanHandleEventTargetIdx(aChain);
@@ -483,6 +509,30 @@ EventTargetChainItem::HandleEventTargetChain(
         }
       }
     }
+
+    // https://dom.spec.whatwg.org/#dispatching-events
+    // Step 14.2
+    // "Set event's relatedTarget to tuple's relatedTarget."
+    // Note, the initial retargeting was done already when creating
+    // event target chain, so we need to do this only after calling
+    // HandleEvent, not before, like in the specification.
+    if (item.GetRetargetedRelatedTarget()) {
+      bool found = false;
+      for (uint32_t j = i; j > 0; --j) {
+        uint32_t childIndex = j - 1;
+        EventTarget* relatedTarget =
+          aChain[childIndex].GetRetargetedRelatedTarget();
+        if (relatedTarget) {
+          found = true;
+          aVisitor.mEvent->mRelatedTarget = relatedTarget;
+          break;
+        }
+      }
+      if (!found) {
+        aVisitor.mEvent->mRelatedTarget =
+          aVisitor.mEvent->mOriginalRelatedTarget;
+      }
+    }
   }
 
   // Target
@@ -509,6 +559,14 @@ EventTargetChainItem::HandleEventTargetChain(
       // Item is at anonymous boundary. Need to retarget for the current item
       // and for parent items.
       aVisitor.mEvent->mTarget = newTarget;
+    }
+
+    // https://dom.spec.whatwg.org/#dispatching-events
+    // Step 15.2
+    // "Set event's relatedTarget to tuple's relatedTarget."
+    EventTarget* relatedTarget = item.GetRetargetedRelatedTarget();
+    if (relatedTarget) {
+      aVisitor.mEvent->mRelatedTarget = relatedTarget;
     }
 
     if (aVisitor.mEvent->mFlags.mBubbles || newTarget) {
@@ -542,6 +600,7 @@ EventTargetChainItem::HandleEventTargetChain(
     // Retarget for system event group (which does the default handling too).
     // Setting back the target which was used also for default event group.
     aVisitor.mEvent->mTarget = firstTarget;
+    aVisitor.mEvent->mRelatedTarget = aVisitor.mEvent->mOriginalRelatedTarget;
     aVisitor.mEvent->mFlags.mInSystemGroup = true;
     HandleEventTargetChain(aChain,
                            aVisitor,
@@ -599,6 +658,7 @@ MayRetargetToChromeIfCanNotHandleEvent(
     EventTargetChainItem::DestroyLast(aChain, aTargetEtci);
   }
   if (aPreVisitor.mAutomaticChromeDispatch && aContent) {
+    aPreVisitor.mRelatedTargetRetargetedInCurrentScope = false;
     // Event target couldn't handle the event. Try to propagate to chrome.
     EventTargetChainItem* chromeTargetEtci =
       EventTargetChainItemForChromeTarget(aChain, aContent, aChildEtci);
@@ -632,6 +692,13 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
   // If aTargets is non-null, the event isn't going to be dispatched.
   NS_ENSURE_TRUE(aEvent->mMessage || !aDOMEvent || aTargets,
                  NS_ERROR_DOM_INVALID_STATE_ERR);
+
+  // Events shall not be fired while we are in stable state to prevent anything
+  // visible from the scripts.
+  // See comment in CycleCollectedJSContext::AfterProcessMicrotasks for why we allow it anyway.
+  // MOZ_ASSERT(!nsContentUtils::IsInStableOrMetaStableState());
+  // NS_ENSURE_TRUE(!nsContentUtils::IsInStableOrMetaStableState(),
+  //                NS_ERROR_DOM_INVALID_STATE_ERR);
 
 #ifdef MOZ_TASK_TRACER
   {
@@ -762,9 +829,10 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
     aEvent->mOriginalTarget = aEvent->mTarget;
   }
 
+  aEvent->mOriginalRelatedTarget = aEvent->mRelatedTarget;
+
   nsCOMPtr<nsIContent> content = do_QueryInterface(aEvent->mOriginalTarget);
-  bool isInAnon = (content && (content->IsInAnonymousSubtree() ||
-                               content->IsInShadowTree()));
+  bool isInAnon = (content && content->IsInAnonymousSubtree());
 
   aEvent->mFlags.mIsBeingDispatched = true;
 
@@ -772,7 +840,7 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
   // GetEventTargetParent for the original target.
   nsEventStatus status = aEventStatus ? *aEventStatus : nsEventStatus_eIgnore;
   EventChainPreVisitor preVisitor(aPresContext, aEvent, aDOMEvent, status,
-                                  isInAnon);
+                                  isInAnon, aEvent->mTarget);
   targetEtci->GetEventTargetParent(preVisitor);
 
   if (!preVisitor.mCanHandle) {
@@ -810,14 +878,21 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
       if (preVisitor.mEventTargetAtParent) {
         // Need to set the target of the event
         // so that also the next retargeting works.
+        preVisitor.mTargetInKnownToBeHandledScope = preVisitor.mEvent->mTarget;
         preVisitor.mEvent->mTarget = preVisitor.mEventTargetAtParent;
         parentEtci->SetNewTarget(preVisitor.mEventTargetAtParent);
       }
 
+      if (preVisitor.mRetargetedRelatedTarget) {
+        preVisitor.mEvent->mRelatedTarget = preVisitor.mRetargetedRelatedTarget;
+      }
+
       parentEtci->GetEventTargetParent(preVisitor);
       if (preVisitor.mCanHandle) {
+        preVisitor.mTargetInKnownToBeHandledScope = preVisitor.mEvent->mTarget;
         topEtci = parentEtci;
       } else {
+        bool ignoreBecauseOfShadowDOM = preVisitor.mIgnoreBecauseOfShadowDOM;
         nsCOMPtr<nsINode> disabledTarget = do_QueryInterface(parentTarget);
         parentEtci = MayRetargetToChromeIfCanNotHandleEvent(chain,
                                                             preVisitor,
@@ -825,9 +900,14 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
                                                             topEtci,
                                                             disabledTarget);
         if (parentEtci && preVisitor.mCanHandle) {
+          preVisitor.mTargetInKnownToBeHandledScope = preVisitor.mEvent->mTarget;
           EventTargetChainItem* item =
             EventTargetChainItem::GetFirstCanHandleEventTarget(chain);
-          item->SetNewTarget(parentTarget);
+          if (!ignoreBecauseOfShadowDOM) {
+            // If we ignored the target because of Shadow DOM retargeting, we
+            // shouldn't treat the target to be in the event path at all.
+            item->SetNewTarget(parentTarget);
+          }
           topEtci = parentEtci;
           continue;
         }
@@ -870,6 +950,19 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
 
   aEvent->mFlags.mIsBeingDispatched = false;
   aEvent->mFlags.mDispatchedAtLeastOnce = true;
+
+  // https://dom.spec.whatwg.org/#concept-event-dispatch
+  // Step 18
+  // "If target's root is a shadow root, then set event's target attribute and
+  //  event's relatedTarget to null."
+  nsCOMPtr<nsIContent> finalTarget = do_QueryInterface(aEvent->mTarget);
+  // TODO: replace with IsShadowRoot() check once bug 1427511 lands.
+  if (finalTarget && ShadowRoot::FromNode(finalTarget->SubtreeRoot())) {
+    aEvent->mTarget = nullptr;
+    aEvent->mOriginalTarget = nullptr;
+    aEvent->mRelatedTarget = nullptr;
+    aEvent->mOriginalRelatedTarget = nullptr;
+  }
 
   if (!externalDOMEvent && preVisitor.mDOMEvent) {
     // An dom::Event was created while dispatching the event.

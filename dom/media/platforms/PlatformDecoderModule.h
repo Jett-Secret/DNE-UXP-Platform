@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,7 +15,9 @@
 #include "mozilla/layers/KnowsCompositor.h"
 #include "nsTArray.h"
 #include "mozilla/RefPtr.h"
+#ifdef MOZ_GMP
 #include "GMPService.h"
+#endif
 #include <queue>
 #include "MediaResult.h"
 
@@ -38,7 +39,6 @@ class RemoteDecoderModule;
 class MediaDataDecoder;
 class MediaDataDecoderCallback;
 class TaskQueue;
-class CDMProxy;
 
 static LazyLogModule sPDMLog("PlatformDecoderModule");
 
@@ -81,7 +81,9 @@ struct MOZ_STACK_CLASS CreateDecoderParams final {
   layers::ImageContainer* mImageContainer = nullptr;
   MediaResult* mError = nullptr;
   RefPtr<layers::KnowsCompositor> mKnowsCompositor;
+#ifdef MOZ_GMP
   RefPtr<GMPCrashHelper> mCrashHelper;
+#endif
   bool mUseBlankDecoder = false;
 
 private:
@@ -90,7 +92,9 @@ private:
   void Set(DecoderDoctorDiagnostics* aDiagnostics) { mDiagnostics = aDiagnostics; }
   void Set(layers::ImageContainer* aImageContainer) { mImageContainer = aImageContainer; }
   void Set(MediaResult* aError) { mError = aError; }
+#ifdef MOZ_GMP
   void Set(GMPCrashHelper* aCrashHelper) { mCrashHelper = aCrashHelper; }
+#endif
   void Set(bool aUseBlankDecoder) { mUseBlankDecoder = aUseBlankDecoder; }
   void Set(layers::KnowsCompositor* aKnowsCompositor) { mKnowsCompositor = aKnowsCompositor; }
   template <typename T1, typename T2, typename... Ts>

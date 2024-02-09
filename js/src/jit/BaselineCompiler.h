@@ -50,6 +50,7 @@ namespace jit {
     _(JSOP_OR)                 \
     _(JSOP_NOT)                \
     _(JSOP_POS)                \
+    _(JSOP_TONUMERIC)          \
     _(JSOP_LOOPHEAD)           \
     _(JSOP_LOOPENTRY)          \
     _(JSOP_VOID)               \
@@ -65,6 +66,7 @@ namespace jit {
     _(JSOP_UINT16)             \
     _(JSOP_UINT24)             \
     _(JSOP_DOUBLE)             \
+    _(JSOP_BIGINT)             \
     _(JSOP_STRING)             \
     _(JSOP_SYMBOL)             \
     _(JSOP_OBJECT)             \
@@ -240,7 +242,11 @@ namespace jit {
     _(JSOP_DEBUGCHECKSELFHOSTED) \
     _(JSOP_JUMPTARGET)         \
     _(JSOP_IS_CONSTRUCTING)    \
-    _(JSOP_TRY_DESTRUCTURING_ITERCLOSE)
+    _(JSOP_TRY_DESTRUCTURING_ITERCLOSE) \
+    _(JSOP_IMPORTMETA)         \
+    _(JSOP_DYNAMIC_IMPORT)     \
+    _(JSOP_INC)                \
+    _(JSOP_DEC)
 
 class BaselineCompiler : public BaselineCompilerSpecific
 {
@@ -279,43 +285,43 @@ class BaselineCompiler : public BaselineCompilerSpecific
 
   public:
     BaselineCompiler(JSContext* cx, TempAllocator& alloc, JSScript* script);
-    MOZ_MUST_USE bool init();
+    [[nodiscard]] bool init();
 
     MethodStatus compile();
 
   private:
     MethodStatus emitBody();
 
-    MOZ_MUST_USE bool emitCheckThis(ValueOperand val);
+    [[nodiscard]] bool emitCheckThis(ValueOperand val);
     void emitLoadReturnValue(ValueOperand val);
 
     void emitInitializeLocals();
-    MOZ_MUST_USE bool emitPrologue();
-    MOZ_MUST_USE bool emitEpilogue();
-    MOZ_MUST_USE bool emitOutOfLinePostBarrierSlot();
-    MOZ_MUST_USE bool emitIC(ICStub* stub, ICEntry::Kind kind);
-    MOZ_MUST_USE bool emitOpIC(ICStub* stub) {
+    [[nodiscard]] bool emitPrologue();
+    [[nodiscard]] bool emitEpilogue();
+    [[nodiscard]] bool emitOutOfLinePostBarrierSlot();
+    [[nodiscard]] bool emitIC(ICStub* stub, ICEntry::Kind kind);
+    [[nodiscard]] bool emitOpIC(ICStub* stub) {
         return emitIC(stub, ICEntry::Kind_Op);
     }
-    MOZ_MUST_USE bool emitNonOpIC(ICStub* stub) {
+    [[nodiscard]] bool emitNonOpIC(ICStub* stub) {
         return emitIC(stub, ICEntry::Kind_NonOp);
     }
 
-    MOZ_MUST_USE bool emitStackCheck(bool earlyCheck=false);
-    MOZ_MUST_USE bool emitInterruptCheck();
-    MOZ_MUST_USE bool emitWarmUpCounterIncrement(bool allowOsr=true);
-    MOZ_MUST_USE bool emitArgumentTypeChecks();
+    [[nodiscard]] bool emitStackCheck(bool earlyCheck=false);
+    [[nodiscard]] bool emitInterruptCheck();
+    [[nodiscard]] bool emitWarmUpCounterIncrement(bool allowOsr=true);
+    [[nodiscard]] bool emitArgumentTypeChecks();
     void emitIsDebuggeeCheck();
-    MOZ_MUST_USE bool emitDebugPrologue();
-    MOZ_MUST_USE bool emitDebugTrap();
-    MOZ_MUST_USE bool emitTraceLoggerEnter();
-    MOZ_MUST_USE bool emitTraceLoggerExit();
-    MOZ_MUST_USE bool emitTraceLoggerResume(Register script, AllocatableGeneralRegisterSet& regs);
+    [[nodiscard]] bool emitDebugPrologue();
+    [[nodiscard]] bool emitDebugTrap();
+    [[nodiscard]] bool emitTraceLoggerEnter();
+    [[nodiscard]] bool emitTraceLoggerExit();
+    [[nodiscard]] bool emitTraceLoggerResume(Register script, AllocatableGeneralRegisterSet& regs);
 
     void emitProfilerEnterFrame();
     void emitProfilerExitFrame();
 
-    MOZ_MUST_USE bool initEnvironmentChain();
+    [[nodiscard]] bool initEnvironmentChain();
 
     void storeValue(const StackValue* source, const Address& dest,
                     const ValueOperand& scratch);
@@ -324,36 +330,36 @@ class BaselineCompiler : public BaselineCompilerSpecific
     OPCODE_LIST(EMIT_OP)
 #undef EMIT_OP
 
-    // JSOP_NEG, JSOP_BITNOT
-    MOZ_MUST_USE bool emitUnaryArith();
+    // JSOP_NEG, JSOP_BITNOT, JSOP_INC, JSOP_DEC
+    [[nodiscard]] bool emitUnaryArith();
 
     // JSOP_BITXOR, JSOP_LSH, JSOP_ADD etc.
-    MOZ_MUST_USE bool emitBinaryArith();
+    [[nodiscard]] bool emitBinaryArith();
 
     // Handles JSOP_LT, JSOP_GT, and friends
-    MOZ_MUST_USE bool emitCompare();
+    [[nodiscard]] bool emitCompare();
 
-    MOZ_MUST_USE bool emitReturn();
+    [[nodiscard]] bool emitReturn();
 
-    MOZ_MUST_USE bool emitToBoolean();
-    MOZ_MUST_USE bool emitTest(bool branchIfTrue);
-    MOZ_MUST_USE bool emitAndOr(bool branchIfTrue);
-    MOZ_MUST_USE bool emitCall();
-    MOZ_MUST_USE bool emitSpreadCall();
+    [[nodiscard]] bool emitToBoolean();
+    [[nodiscard]] bool emitTest(bool branchIfTrue);
+    [[nodiscard]] bool emitAndOr(bool branchIfTrue);
+    [[nodiscard]] bool emitCall();
+    [[nodiscard]] bool emitSpreadCall();
 
-    MOZ_MUST_USE bool emitInitPropGetterSetter();
-    MOZ_MUST_USE bool emitInitElemGetterSetter();
+    [[nodiscard]] bool emitInitPropGetterSetter();
+    [[nodiscard]] bool emitInitElemGetterSetter();
 
-    MOZ_MUST_USE bool emitFormalArgAccess(uint32_t arg, bool get);
+    [[nodiscard]] bool emitFormalArgAccess(uint32_t arg, bool get);
 
-    MOZ_MUST_USE bool emitThrowConstAssignment();
-    MOZ_MUST_USE bool emitUninitializedLexicalCheck(const ValueOperand& val);
+    [[nodiscard]] bool emitThrowConstAssignment();
+    [[nodiscard]] bool emitUninitializedLexicalCheck(const ValueOperand& val);
 
-    MOZ_MUST_USE bool emitIsMagicValue();
+    [[nodiscard]] bool emitIsMagicValue();
 
-    MOZ_MUST_USE bool addPCMappingEntry(bool addIndexEntry);
+    [[nodiscard]] bool addPCMappingEntry(bool addIndexEntry);
 
-    MOZ_MUST_USE bool addYieldAndAwaitOffset();
+    [[nodiscard]] bool addYieldAndAwaitOffset();
 
     void getEnvironmentCoordinateObject(Register reg);
     Address getEnvironmentCoordinateAddressFromObject(Register objReg, Register reg);

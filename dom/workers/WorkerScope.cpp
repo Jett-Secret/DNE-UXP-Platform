@@ -7,6 +7,7 @@
 
 #include "jsapi.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/Console.h"
 #include "mozilla/dom/DedicatedWorkerGlobalScopeBinding.h"
@@ -57,7 +58,8 @@ NS_CreateJSTimeoutHandler(JSContext* aCx,
 extern already_AddRefed<nsIScriptTimeoutHandler>
 NS_CreateJSTimeoutHandler(JSContext* aCx,
                           mozilla::dom::workers::WorkerPrivate* aWorkerPrivate,
-                          const nsAString& aExpression);
+                          const nsAString& aExpression,
+                          mozilla::ErrorResult& aRv);
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -267,7 +269,7 @@ WorkerGlobalScope::SetTimeout(JSContext* aCx,
 
   nsCOMPtr<nsIScriptTimeoutHandler> handler =
     NS_CreateJSTimeoutHandler(aCx, mWorkerPrivate, aHandler, aArguments, aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
+  if (!handler) {
     return 0;
   }
 
@@ -284,7 +286,11 @@ WorkerGlobalScope::SetTimeout(JSContext* aCx,
   mWorkerPrivate->AssertIsOnWorkerThread();
 
   nsCOMPtr<nsIScriptTimeoutHandler> handler =
-    NS_CreateJSTimeoutHandler(aCx, mWorkerPrivate, aHandler);
+    NS_CreateJSTimeoutHandler(aCx, mWorkerPrivate, aHandler, aRv);
+  if (!handler) {
+    return 0;
+  }
+
   return mWorkerPrivate->SetTimeout(aCx, handler, aTimeout, false, aRv);
 }
 
@@ -298,14 +304,11 @@ WorkerGlobalScope::ClearTimeout(int32_t aHandle)
 int32_t
 WorkerGlobalScope::SetInterval(JSContext* aCx,
                                Function& aHandler,
-                               const Optional<int32_t>& aTimeout,
+                               const int32_t aTimeout,
                                const Sequence<JS::Value>& aArguments,
                                ErrorResult& aRv)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
-
-  bool isInterval = aTimeout.WasPassed();
-  int32_t timeout = aTimeout.WasPassed() ? aTimeout.Value() : 0;
 
   nsCOMPtr<nsIScriptTimeoutHandler> handler =
     NS_CreateJSTimeoutHandler(aCx, mWorkerPrivate, aHandler, aArguments, aRv);
@@ -313,13 +316,13 @@ WorkerGlobalScope::SetInterval(JSContext* aCx,
     return 0;
   }
 
-  return mWorkerPrivate->SetTimeout(aCx, handler,  timeout, isInterval, aRv);
+  return mWorkerPrivate->SetTimeout(aCx, handler,  aTimeout, true, aRv);
 }
 
 int32_t
 WorkerGlobalScope::SetInterval(JSContext* aCx,
                                const nsAString& aHandler,
-                               const Optional<int32_t>& aTimeout,
+                               const int32_t aTimeout,
                                const Sequence<JS::Value>& /* unused */,
                                ErrorResult& aRv)
 {
@@ -327,12 +330,12 @@ WorkerGlobalScope::SetInterval(JSContext* aCx,
 
   Sequence<JS::Value> dummy;
 
-  bool isInterval = aTimeout.WasPassed();
-  int32_t timeout = aTimeout.WasPassed() ? aTimeout.Value() : 0;
-
   nsCOMPtr<nsIScriptTimeoutHandler> handler =
-    NS_CreateJSTimeoutHandler(aCx, mWorkerPrivate, aHandler);
-  return mWorkerPrivate->SetTimeout(aCx, handler, timeout, isInterval, aRv);
+    NS_CreateJSTimeoutHandler(aCx, mWorkerPrivate, aHandler, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return 0;
+  }
+  return mWorkerPrivate->SetTimeout(aCx, handler, aTimeout, true, aRv);
 }
 
 void
@@ -492,6 +495,15 @@ WorkerGlobalScope::CreateImageBitmap(const ImageBitmapSource& aImage,
   }
 }
 
+// https://html.spec.whatwg.org/#structured-cloning
+void WorkerGlobalScope::StructuredClone(JSContext* aCx,
+                                        JS::Handle<JS::Value> aValue,
+                                        const StructuredSerializeOptions& aOptions,
+                                        JS::MutableHandle<JS::Value> aRv,
+                                        ErrorResult& aError) {
+  nsContentUtils::StructuredClone(aCx, this, aValue, aOptions, aRv, aError);
+}
+
 DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate)
 : WorkerGlobalScope(aWorkerPrivate)
 {
@@ -535,11 +547,20 @@ DedicatedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
 void
 DedicatedWorkerGlobalScope::PostMessage(JSContext* aCx,
                                         JS::Handle<JS::Value> aMessage,
-                                        const Optional<Sequence<JS::Value>>& aTransferable,
+                                        const Sequence<JSObject*>& aTransferable,
                                         ErrorResult& aRv)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
   mWorkerPrivate->PostMessageToParent(aCx, aMessage, aTransferable, aRv);
+}
+
+void
+DedicatedWorkerGlobalScope::PostMessage(JSContext* aCx,
+                                        JS::Handle<JS::Value> aMessage,
+                                        const StructuredSerializeOptions& aOptions,
+                                        ErrorResult& aRv)
+{
+  PostMessage(aCx, aMessage, aOptions.mTransfer, aRv);
 }
 
 SharedWorkerGlobalScope::SharedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate,

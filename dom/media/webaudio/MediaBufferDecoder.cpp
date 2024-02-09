@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -25,7 +24,9 @@
 #include "WebAudioUtils.h"
 #include "mozilla/dom/Promise.h"
 #include "nsPrintfCString.h"
+#ifdef MOZ_GMP
 #include "GMPService.h"
+#endif
 
 namespace mozilla {
 
@@ -181,6 +182,7 @@ MediaDecodeTask::Run()
   return NS_OK;
 }
 
+#ifdef MOZ_GMP
 class BufferDecoderGMPCrashHelper : public GMPCrashHelper
 {
 public:
@@ -198,6 +200,7 @@ public:
 private:
   nsWeakPtr mParent;
 };
+#endif
 
 bool
 MediaDecodeTask::CreateReader()
@@ -216,8 +219,12 @@ MediaDecodeTask::CreateReader()
                             mLength, principal, mContentType);
 
   MOZ_ASSERT(!mBufferDecoder);
+#ifdef MOZ_GMP
   mBufferDecoder = new BufferDecoder(resource,
     new BufferDecoderGMPCrashHelper(mDecodeJob.mContext->GetParentObject()));
+#else
+    mBufferDecoder = new BufferDecoder(resource);
+#endif
 
   // If you change this list to add support for new decoders, please consider
   // updating HTMLMediaElement::CreateDecoder as well.

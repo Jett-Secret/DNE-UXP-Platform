@@ -21,13 +21,15 @@
 
 pref("keyword.enabled", false);
 pref("general.useragent.locale", "chrome://global/locale/intl.properties");
+
+// Platform User-agent compatibility mode default settings
 pref("general.useragent.compatMode.gecko", false);
 pref("general.useragent.compatMode.firefox", false);
-pref("general.useragent.compatMode.version", "68.0");
+pref("general.useragent.compatMode.version", "102.0");
 pref("general.useragent.appVersionIsBuildID", false);
 
-// This pref exists only for testing purposes. In order to disable all
-// overrides by default, don't initialize UserAgentOverrides.jsm.
+// In order to disable all overrides by default, don't initialize
+// UserAgentOverrides.jsm.
 pref("general.useragent.site_specific_overrides", true);
 
 pref("general.config.obscure_value", 13); // for MCD .cfg files
@@ -183,7 +185,7 @@ pref("dom.enable_resource_timing", true);
 pref("dom.enable_user_timing", true);
 
 // Whether performance.GetEntries* will contain an entry for the active document
-pref("dom.enable_performance_navigation_timing", false);
+pref("dom.enable_performance_navigation_timing", true);
 
 // Enable printing performance marks/measures to log
 pref("dom.performance.enable_user_timing_logging", false);
@@ -402,9 +404,11 @@ pref("media.libavcodec.allow-obsolete", false);
 #if defined(MOZ_FFVPX)
 pref("media.ffvpx.enabled", true);
 #endif
+#ifdef MOZ_GMP
 pref("media.gmp.decoder.enabled", false);
 pref("media.gmp.decoder.aac", 0);
 pref("media.gmp.decoder.h264", 0);
+#endif
 #ifdef MOZ_RAW
 pref("media.raw.enabled", true);
 #endif
@@ -421,13 +425,14 @@ pref("media.apple.mp3.enabled", true);
 pref("media.apple.mp4.enabled", true);
 #endif
 
+#ifdef MOZ_GMP
 // GMP storage version number. At startup we check the version against
 // media.gmp.storage.version.observed, and if the versions don't match,
 // we clear storage and set media.gmp.storage.version.observed=expected.
 // This provides a mechanism to clear GMP storage when non-compatible
 // changes are made.
 pref("media.gmp.storage.version.expected", 1);
-
+#endif
 // Filter what triggers user notifications.
 // See DecoderDoctorDocumentWatcher::ReportAnalysis for details.
 pref("media.decoder-doctor.notifications-allowed", "MediaWMFNeeded,MediaWidevineNoWMFNoSilverlight,MediaCannotInitializePulseAudio,MediaCannotPlayNoDecoders,MediaUnsupportedLibavcodec");
@@ -563,14 +568,8 @@ pref("media.track.enabled", false);
 
 // Whether to enable MediaSource support.
 pref("media.mediasource.enabled", true);
-
 pref("media.mediasource.mp4.enabled", true);
-
-#if defined(XP_WIN) || defined(XP_MACOSX)
-pref("media.mediasource.webm.enabled", false);
-#else
 pref("media.mediasource.webm.enabled", true);
-#endif
 pref("media.mediasource.webm.audio.enabled", true);
 
 #ifdef MOZ_AV1
@@ -586,8 +585,8 @@ pref("media.benchmark.frames", 300);
 pref("media.benchmark.timeout", 1000);
 
 #ifdef MOZ_WEBSPEECH
-pref("media.webspeech.recognition.enable", false);
-pref("media.webspeech.synth.enabled", false);
+// Web text-to-speech API enabled?
+pref("media.webspeech.synth.enabled", true);
 #endif
 #ifdef MOZ_WEBM_ENCODER
 pref("media.encoder.webm.enabled", true);
@@ -1136,7 +1135,7 @@ pref("dom.require_user_interaction_for_beforeunload", true);
 
 pref("dom.disable_open_during_load",                false);
 pref("dom.popup_maximum",                           20);
-pref("dom.popup_allowed_events", "change click dblclick mouseup pointerup notificationclick reset submit touchend");
+pref("dom.popup_allowed_events", "change click dblclick auxclick mouseup pointerup notificationclick reset submit touchend");
 pref("dom.disable_open_click_delay", 1000);
 
 pref("dom.storage.enabled", true);
@@ -1195,7 +1194,10 @@ pref("dom.sysmsg.enabled", false);
 // Enable pre-installed applications.
 pref("dom.webapps.useCurrentProfile", false);
 
-pref("dom.cycle_collector.incremental", true);
+// Use incremental cycle collection?
+// In practice this gave a noticeable performance hit. Default off.
+// See forum topic https://forum.palemoon.org/viewtopic.php?f=62&t=29887
+pref("dom.cycle_collector.incremental", false);
 
 // Parsing perf prefs. For now just mimic what the old code did.
 #ifndef XP_WIN
@@ -1210,15 +1212,12 @@ pref("privacy.popups.disable_from_plugins", 2);
 
 // Send "Sec-GPC" HTTP header, disabled by default
 pref("privacy.GPCheader.enabled",    false);
-// Enforce tracking protection in all modes
-pref("privacy.trackingprotection.enabled",  false);
-// Enforce tracking protection in Private Browsing mode
-pref("privacy.trackingprotection.pbmode.enabled",  false);
 
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.clipboardevents.enabled",   true);
 
-pref("dom.webcomponents.enabled",           false);
+// Enable Google WebComponents?
+pref("dom.webcomponents.enabled",           true);
 
 pref("javascript.enabled",                  true);
 // Enable Array.prototype.values
@@ -1299,6 +1298,11 @@ pref("javascript.options.main_thread_stack_quota_cap", 6291456);
 pref("javascript.options.main_thread_stack_quota_cap", 2097152);
 #endif
 
+// Dynamic module import.
+pref("javascript.options.dynamicImport", true);
+
+// Streams API
+pref("javascript.options.streams", true);
 
 // advanced prefs
 pref("advanced.mailftp",                    false);
@@ -1367,6 +1371,8 @@ pref("network.protocol-handler.external.shell", false);
 pref("network.protocol-handler.external.vbscript", false);
 pref("network.protocol-handler.external.vnd.ms.radio", false);
 #ifdef XP_WIN
+pref("network.protocol-handler.external.ms-cxh", false);
+pref("network.protocol-handler.external.ms-cxh-full", false);
 pref("network.protocol-handler.external.ms-help", false);
 pref("network.protocol-handler.external.ms-msdt", false);
 pref("network.protocol-handler.external.search", false);
@@ -1563,7 +1569,7 @@ pref("network.http.spdy.coalesce-hostnames", true);
 pref("network.http.spdy.persistent-settings", false);
 pref("network.http.spdy.ping-threshold", 58);
 pref("network.http.spdy.ping-timeout", 8);
-pref("network.http.spdy.send-buffer-size", 131072);
+pref("network.http.spdy.send-buffer-size", 0); // 0 - Auto (managed by OS)
 pref("network.http.spdy.allow-push", true);
 pref("network.http.spdy.push-allowance", 131072);   // 128KB
 pref("network.http.spdy.pull-allowance", 12582912); // 12MB
@@ -2148,6 +2154,7 @@ pref("security.notification_enable_delay", 500);
 pref("security.csp.enable", true);
 pref("security.csp.experimentalEnabled", false);
 pref("security.csp.enableStrictDynamic", true);
+pref("security.csp.reporting.enabled", true);
 
 // Default Content Security Policy to apply to signed contents.
 pref("security.signed_content.CSP.default", "script-src 'self'; style-src 'self'");
@@ -2161,6 +2168,9 @@ pref("security.sri.enable", true);
 
 // Block scripts with wrong MIME type such as image/ or video/.
 pref("security.block_script_with_wrong_mime", true);
+
+// Block scripts with wrong MIME type when loading via importScripts() in workers.
+pref("security.block_importScripts_with_wrong_mime", false);
 
 // Block images of wrong MIME for XCTO: nosniff.
 pref("security.xcto_nosniff_block_images", false);
@@ -2448,6 +2458,12 @@ pref("layout.css.mix-blend-mode.enabled", true);
 // Is support for isolation enabled?
 pref("layout.css.isolation.enabled", true);
 
+// Is support for CSS animation properties enabled?
+pref("layout.css.animation.enabled", true);
+
+// Is support for CSS transition properties enabled?
+pref("layout.css.transition.enabled", true);
+
 // Is support for CSS Filters enabled?
 pref("layout.css.filters.enabled", true);
 
@@ -2470,15 +2486,6 @@ pref("layout.css.scroll-snap.prediction-sensitivity", "0.750");
 
 // Is support for basic shapes in clip-path enabled?
 pref("layout.css.clip-path-shapes.enabled", true);
-
-// Is support for DOMPoint enabled?
-pref("layout.css.DOMPoint.enabled", true);
-
-// Is support for DOMQuad enabled?
-pref("layout.css.DOMQuad.enabled", true);
-
-// Is support for DOMMatrix enabled?
-pref("layout.css.DOMMatrix.enabled", true);
 
 // Is support for GeometryUtils.getBoxQuads enabled?
 pref("layout.css.getBoxQuads.enabled", true);
@@ -2521,6 +2528,15 @@ pref("layout.css.prefixes.webkit", true);
 // (Note: this pref has no effect if the master 'layout.css.prefixes.webkit'
 // pref is set to false.)
 pref("layout.css.prefixes.device-pixel-ratio-webkit", false);
+
+// Is the legacy negation pseudo-class behavior enabled?
+pref("layout.css.legacy-negation-pseudo.enabled", false);
+
+// Is support for the :is() and :where() selectors enabled?
+pref("layout.css.is-where-pseudo.enabled", true);
+
+// Is support for the ::slotted() selector enabled?
+pref("layout.css.slotted-pseudo.enabled", true);
 
 // Is support for the :scope selector enabled?
 pref("layout.css.scope-pseudo.enabled", true);
@@ -2706,8 +2722,11 @@ pref("editor.resizing.preserve_ratio",       true);
 pref("editor.positioning.offset",            0);
 
 pref("dom.use_watchdog", true);
-pref("dom.max_chrome_script_run_time", 90);
-pref("dom.max_script_run_time", 20);
+pref("dom.max_chrome_script_run_time", 30);
+pref("dom.max_script_run_time", 15);
+
+// Automatically terminate non-responsive scripts if script_run_time expires.
+pref("dom.always_stop_slow_scripts", false);
 
 // Stop all scripts in a compartment when the "stop script" dialog is used.
 pref("dom.global_stop_script", true);
@@ -4061,13 +4080,7 @@ pref("intl.ime.use_simple_context_on_password_field", true);
 pref("intl.ime.use_simple_context_on_password_field", false);
 #endif
 
-# enable new platform fontlist for linux on GTK platforms
-# temporary pref to allow flipping back to the existing
-# gfxPangoFontGroup/gfxFontconfigUtils code for handling system fonts
-
 #ifdef MOZ_WIDGET_GTK
-pref("gfx.font_rendering.fontconfig.fontlist.enabled", true);
-
 // maximum number of fonts to substitute for a generic
 pref("gfx.font_rendering.fontconfig.max_generic_substitutions", 3);
 #endif
@@ -4221,10 +4234,8 @@ pref("image.mem.surfacecache.discard_factor", 1);
 // automatically determined based on the system's number of cores.
 pref("image.multithreaded_decoding.limit", -1);
 
-// Whether we attempt to decode WebP images or not.
-pref("image.webp.enabled", true);
-
 #ifdef MOZ_JXL
+// Whether we attempt to decode JPEG-XL images or not.
 pref("image.jxl.enabled", true);
 #endif
 
@@ -4259,6 +4270,7 @@ pref("webgl.can-lose-context-in-foreground", true);
 pref("webgl.restore-context-when-visible", true);
 pref("webgl.max-warnings-per-context", 32);
 pref("webgl.max-size-per-texture-mb", 1024);
+pref("webgl.max-vert-ids-per-draw", 30000000);
 pref("webgl.enable-draft-extensions", false);
 pref("webgl.enable-privileged-extensions", false);
 pref("webgl.bypass-shader-validation", false);
@@ -4281,6 +4293,13 @@ pref("webgl.angle.force-d3d11", false);
 pref("webgl.angle.force-warp", false);
 pref("webgl.dxgl.enabled", true);
 pref("webgl.dxgl.needs-finish", false);
+#endif
+
+// Disable ANGLE's validation layer?
+#ifdef XP_WIN
+pref("webgl.gl_khr_no_validation", false);
+#else
+pref("webgl.gl_khr_no_validation", true);
 #endif
 
 pref("gfx.offscreencanvas.enabled", false);
@@ -4494,6 +4513,9 @@ pref("full-screen-api.enabled", false);
 pref("full-screen-api.unprefix.enabled", true);
 pref("full-screen-api.allow-trusted-requests-only", true);
 pref("full-screen-api.pointer-lock.enabled", true);
+// Whether to restrict the full-screen API to the existing window size
+// If true, this effectively make fullscreen "fill window" instead.
+pref("full-screen-api.restrict-to-window", false);
 
 // transition duration of fade-to-black and fade-from-black, unit: ms
 pref("full-screen-api.transition-duration.enter", "0 0");
@@ -4523,6 +4545,9 @@ pref("layout.animated-image-layers.enabled", false);
 
 // Abort API
 pref("dom.abortController.enabled", true);
+
+// Streams API
+pref("dom.streams.enabled", true);
 
 // Push
 pref("dom.push.enabled", false);
@@ -4562,9 +4587,6 @@ pref("dom.push.requestTimeout", 10000);
 pref("dom.push.http2.reset_retry_count_after_ms", 60000);
 pref("dom.push.http2.maxRetries", 2);
 pref("dom.push.http2.retryInterval", 5000);
-
-// Whether WC getRootNode is available
-pref("dom.getRootNode.enabled", false);
 
 // WebNetworkStats
 pref("dom.mozNetworkStats.enabled", false);
@@ -4890,6 +4912,7 @@ pref("browser.search.reset.whitelist", "");
 pref("browser.search.official", true);
 #endif
 
+#ifdef MOZ_GMP
 // GMPInstallManager prefs
 
 // User-settable override to media.gmp-manager.url for testing purposes.
@@ -4925,6 +4948,7 @@ pref("media.gmp-manager.certs.1.issuerName", "CN=DigiCert SHA2 Secure Server CA,
 pref("media.gmp-manager.certs.1.commonName", "aus5.mozilla.org");
 pref("media.gmp-manager.certs.2.issuerName", "CN=thawte SSL CA - G2,O=\"thawte, Inc.\",C=US");
 pref("media.gmp-manager.certs.2.commonName", "aus5.mozilla.org");
+#endif
 
 // Whether or not to perform reader mode article parsing on page load.
 // If this pref is disabled, we will never show a reader mode icon in the toolbar.
@@ -5082,6 +5106,9 @@ pref("prompts.content_handling_dialog_modal.enabled", false);
 // Whether module scripts (<script type="module">) are enabled for content.
 pref("dom.moduleScripts.enabled", true);
 
+// Whether read-only Window property event is enabled for content.
+pref("dom.window.event.enabled", false);
+
 // Report details when a media source error occurs?
 // Enabled by default in debug builds, otherwise should be explicitly enabled
 // by the user to prevent XO leaking of the response status (CVE-2020-15666)
@@ -5090,3 +5117,10 @@ pref("media.sourceErrorDetails.enabled", true);
 #else
 pref("media.sourceErrorDetails.enabled", false);
 #endif
+
+// Whether Navigator.Clipboard methods are a thing.
+pref("dom.events.asyncClipboard", true);
+// Whether arbitrary data transfer methods (not plaintext) are allowed.
+pref("dom.events.asyncClipboard.dataTransfer", true);
+// Whether to use ClipboardItem spec or not.
+pref("dom.events.asyncClipboard.clipboardItem", false);

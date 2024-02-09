@@ -47,7 +47,7 @@ dnl ========================================================
 MOZJPEG=62
 MOZPNG=10625
 NSPR_VERSION=4
-NSPR_MINVER=4.20
+NSPR_MINVER=4.35
 NSS_VERSION=3
 
 dnl Set the minimum version of toolkit libs used by mozilla
@@ -58,6 +58,7 @@ GLIB_VERSION=2.22
 GLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_26
 GIO_VERSION=2.22
 CAIRO_VERSION=1.10
+PANGO_VERSION=1.22.0
 GTK2_VERSION=2.18.0
 GTK3_VERSION=3.4.0
 GDK_VERSION_MAX_ALLOWED=GDK_VERSION_3_4
@@ -68,6 +69,7 @@ GCONF_VERSION=1.2.1
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
 SQLITE_VERSION=3.36.0
+FONTCONFIG_VERSION=2.7.0
 
 dnl Set various checks
 dnl ========================================================
@@ -729,6 +731,26 @@ AC_SUBST(MOZILLA_UAVERSION_U)
 MOZ_DOING_LTO(lto_is_enabled)
 
 dnl ========================================================
+dnl Spidermonkey link-time optimization support
+dnl ========================================================
+
+# We want LTO enabled by default in Spidermonkey if we're building it shared.
+if test -n "$JS_SHARED_LIBRARY"; then
+    JS_LTO=1
+fi
+
+MOZ_ARG_DISABLE_BOOL(js-lto,
+[  --disable-js-lto        Disable link-time optimization for the Spidermonkey library],
+    JS_LTO=,
+    JS_LTO=1)
+
+if test -n "$JS_LTO"; then
+    AC_DEFINE(JS_LTO)
+fi
+
+AC_SUBST(JS_LTO)
+
+dnl ========================================================
 dnl System overrides of the defaults for target
 dnl ========================================================
 
@@ -737,7 +759,9 @@ case "$target" in
     MKSHLIB='$(CXX) $(CXXFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -o $@'
     MKCSHLIB='$(CC) $(CFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -o $@'
     MOZ_OPTIMIZE_FLAGS="-O3"
-    CXXFLAGS="$CXXFLAGS -stdlib=libc++"
+    if test -n "$CLANG_CC" ; then
+        CXXFLAGS="$CXXFLAGS -stdlib=libc++"
+    fi
     DLL_SUFFIX=".dylib"
     DSO_LDOPTS=''
     STRIP_FLAGS="$STRIP_FLAGS -x -S"
@@ -1107,9 +1131,9 @@ dnl default mode that relies on relative symlinks being handled a certain way.
     fi
 
     if test "$CPU_ARCH" = "x86"; then
-       MOZ_FIX_LINK_PATHS="-L${DIST}/bin -R'\$\$ORIGIN':/usr/gcc/7/lib"
+       MOZ_FIX_LINK_PATHS="-L${DIST}/bin -R'\$\$ORIGIN':/usr/gcc/10/lib"
     elif test "$CPU_ARCH" = "x86_64"; then
-       MOZ_FIX_LINK_PATHS="-L${DIST}/bin -R'\$\$ORIGIN':/usr/gcc/7/lib/amd64"
+       MOZ_FIX_LINK_PATHS="-L${DIST}/bin -R'\$\$ORIGIN':/usr/gcc/10/lib/amd64"
     fi    
     ;;
 
@@ -1984,6 +2008,7 @@ MOZ_VORBIS=
 MOZ_TREMOR=
 MOZ_SAMPLE_TYPE_FLOAT32=
 MOZ_SAMPLE_TYPE_S16=
+MOZ_GMP=
 MOZ_WEBRTC=
 MOZ_PEERCONNECTION=
 MOZ_SRTP=
@@ -2025,6 +2050,7 @@ MOZ_USERINFO=1
 NSS_DISABLE_DBM=
 MOZ_MAILNEWS=
 MOZ_MAILNEWS_OAUTH2=
+MOZ_CLASSIC_ACCOUNT_WIZARD=
 MOZ_LDAP_XPCOM=
 MOZ_MORK=
 MOZ_MAPI_SUPPORT=
@@ -2087,6 +2113,34 @@ if test -n "$WITH_APP_BASENAME" ; then
     MOZ_APP_BASENAME="$WITH_APP_BASENAME"
 fi
 
+# Allow someone to change the xulrunner-stub name in mozconfig
+MOZ_ARG_WITH_STRING(xulrunner-stub-name,
+[  --with-xulrunner-stub-name=appname   Create the xulrunner stub with the given name],
+  XULRUNNER_STUB_NAME=$withval)
+
+if test -z "$XULRUNNER_STUB_NAME"; then
+  XULRUNNER_STUB_NAME=xulrunner-stub
+fi
+AC_SUBST(XULRUNNER_STUB_NAME)
+
+dnl ========================================================
+dnl = NPAPI support
+dnl ========================================================
+
+MOZ_ENABLE_NPAPI=1
+
+MOZ_ARG_DISABLE_BOOL(npapi,
+[  --disable-npapi          Disable NPAPI support ],
+    MOZ_ENABLE_NPAPI=,
+    MOZ_ENABLE_NPAPI=1)
+
+if test "$MOZ_ENABLE_NPAPI"
+then
+    AC_DEFINE(MOZ_ENABLE_NPAPI)
+fi
+
+AC_SUBST(MOZ_ENABLE_NPAPI)
+
 dnl ========================================================
 dnl =
 dnl = Toolkit Options
@@ -2099,12 +2153,24 @@ dnl = Enable the toolkit as needed                         =
 dnl ========================================================
 
 case "$MOZ_WIDGET_TOOLKIT" in
+ 
+gtk3)
+    USE_FC_FREETYPE=1
+    ;;
+
+gtk2)
+    USE_FC_FREETYPE=1
+    ;;
 
 cocoa)
     LDFLAGS="$LDFLAGS -framework Cocoa -lobjc"
     # Use -Wl as a trick to avoid -framework and framework names from
     # being separated by AC_SUBST_LIST.
-    TK_LIBS='-Wl,-framework,CoreLocation -Wl,-framework,QuartzCore -Wl,-framework,Carbon -Wl,-framework,CoreAudio -Wl,-framework,AudioToolbox -Wl,-framework,AudioUnit -Wl,-framework,AddressBook -Wl,-framework,OpenGL -Wl,-framework,Security -Wl,-framework,ServiceManagement'
+    TK_LIBS='-Wl,-framework,QuartzCore -Wl,-framework,Carbon -Wl,-framework,CoreAudio -Wl,-framework,AudioToolbox -Wl,-framework,AudioUnit -Wl,-framework,AddressBook -Wl,-framework,OpenGL -Wl,-framework,Security'
+    if test "$CPU_ARCH" != "ppc"
+    then
+        TK_LIBS="-Wl,-framework,CoreLocation $TK_LIBS -Wl,-framework,ServiceManagement"
+    fi
     TK_CFLAGS=""
     CFLAGS="$CFLAGS $TK_CFLAGS"
     CXXFLAGS="$CXXFLAGS $TK_CFLAGS"
@@ -2142,9 +2208,15 @@ if test "$COMPILE_ENVIRONMENT"; then
     dnl are suppressed by widget/gtk/compat-gtk3/gdk/gdkversionmacros.h.
     AC_DEFINE_UNQUOTED(GDK_VERSION_MAX_ALLOWED,$GDK_VERSION_MAX_ALLOWED)
     GLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_32
+    dnl We want to check GTK2 packages if NPAPI is enabled, even if building with GTK3.
+    if test "$MOZ_ENABLE_NPAPI"; then
+      MOZ_CHECK_GTK2=1
+    fi
   fi
   if test "$MOZ_WIDGET_TOOLKIT" = gtk2; then
     GLIB_VERSION_MAX_ALLOWED=$GLIB_VERSION_MIN_REQUIRED
+    dnl Check GTK2 packages if we're building against GTK2, whether NPAPI is disabled or not.
+    MOZ_CHECK_GTK2=1
   fi
   if test "$MOZ_ENABLE_GTK"; then
     if test "$MOZ_X11"; then
@@ -2153,8 +2225,11 @@ if test "$COMPILE_ENVIRONMENT"; then
     AC_DEFINE_UNQUOTED(GLIB_VERSION_MIN_REQUIRED,$GLIB_VERSION_MIN_REQUIRED)
     AC_DEFINE_UNQUOTED(GLIB_VERSION_MAX_ALLOWED,$GLIB_VERSION_MAX_ALLOWED)
 
-    PKG_CHECK_MODULES(MOZ_GTK2, gtk+-2.0 >= $GTK2_VERSION gtk+-unix-print-2.0 glib-2.0 >= $GLIB_VERSION gobject-2.0 $GDK_PACKAGES)
+    if test "$MOZ_CHECK_GTK2"; then
+      PKG_CHECK_MODULES(MOZ_GTK2, gtk+-2.0 >= $GTK2_VERSION gtk+-unix-print-2.0 glib-2.0 >= $GLIB_VERSION gobject-2.0 $GDK_PACKAGES, ,
+                               [AC_MSG_ERROR([ * * * Could not find gtk+-2.0. Required for NPAPI plugins. To build without NPAPI, add --disable-npapi to your .mozconfig and clobber.])])
     MOZ_GTK2_CFLAGS="-I${_topsrcdir}/widget/gtk/compat $MOZ_GTK2_CFLAGS"
+    fi
   fi
   if test "$MOZ_WIDGET_TOOLKIT" = gtk2; then
     TK_CFLAGS=$MOZ_GTK2_CFLAGS
@@ -2285,6 +2360,15 @@ fi
 
 AC_DEFINE_UNQUOTED(MOZ_DISTRIBUTION_ID,"$MOZ_DISTRIBUTION_ID")
 AC_SUBST(MOZ_DISTRIBUTION_ID)
+
+ dnl ========================================================
+ dnl = Pango
+ dnl ========================================================
+if test "$MOZ_ENABLE_GTK"
+then
+    PKG_CHECK_MODULES(_PANGOCHK, pango >= $PANGO_VERSION)
+    PKG_CHECK_MODULES(MOZ_PANGO, pango >= $PANGO_VERSION pangoft2 >= $PANGO_VERSION pangocairo >= $PANGO_VERSION)
+fi
 
 dnl ========================================================
 dnl = GIO and GConf support module
@@ -2591,6 +2675,20 @@ fi
 AC_SUBST(MOZ_MAILNEWS_OAUTH2)
 
 dnl =========================================================
+dnl = Mailnews Classic Account Wizard
+dnl =========================================================
+MOZ_ARG_ENABLE_BOOL(classic-account-wizard,
+[  --enable-classic-account-wizard   Enable the classic account wizard in mailnews],
+    MOZ_CLASSIC_ACCOUNT_WIZARD=1,
+    MOZ_CLASSIC_ACCOUNT_WIZARD= )
+
+if test -n "$MOZ_CLASSIC_ACCOUNT_WIZARD"; then
+   AC_DEFINE(MOZ_CLASSIC_ACCOUNT_WIZARD)
+fi
+
+AC_SUBST(MOZ_CLASSIC_ACCOUNT_WIZARD)
+
+dnl =========================================================
 dnl = LDAP
 dnl =========================================================
 MOZ_ARG_DISABLE_BOOL(ldap,
@@ -2648,6 +2746,9 @@ if test -n "$MOZ_WEBRTC"; then
     AC_DEFINE(MOZ_WEBRTC_ASSERT_ALWAYS)
     MOZ_RAW=1
     MOZ_VPX_ERROR_CONCEALMENT=1
+    if test -z "$MOZ_ENABLE_NPAPI"; then
+        AC_MSG_ERROR([--enable-webrtc requires NPAPI to be enabled. You must either build with --disable-webrtc, or remove --disable-npapi from your .mozconfig.])
+    fi
 
 dnl enable once Signaling lands
     MOZ_WEBRTC_SIGNALING=1
@@ -2698,6 +2799,20 @@ else
     AC_DEFINE(MOZ_SAMPLE_TYPE_FLOAT32)
     AC_SUBST(MOZ_SAMPLE_TYPE_FLOAT32)
 fi
+
+dnl ========================================================
+dnl = Enable Gecko Media Plugins
+dnl ========================================================
+
+if test -n "$MOZ_WEBRTC"; then
+    MOZ_GMP=1
+fi
+
+if test -n "$MOZ_GMP"; then
+    AC_DEFINE(MOZ_GMP)
+fi
+
+AC_SUBST(MOZ_GMP)
 
 dnl ========================================================
 dnl = Enable Raw Codecs
@@ -2755,25 +2870,6 @@ if test -n "$MOZ_APPLEMEDIA"; then
 fi
 fi # COMPILE_ENVIRONMENT
 
-dnl ========================================================
-dnl = EME support
-dnl ========================================================
-
-MOZ_ARG_ENABLE_BOOL(eme,
-[  --enable-eme           Enable support for Encrypted Media Extensions  ],
-    MOZ_EME=1,
-    MOZ_EME=)
-
-
-if test -n "$MOZ_EME"; then
-    if test -z "$MOZ_FMP4"; then
-        AC_MSG_ERROR([Encrypted Media Extension support requires Fragmented MP4 support])
-    fi
-    AC_DEFINE(MOZ_EME)
-fi
-
-AC_SUBST(MOZ_EME)
-
 MOZ_LIBVPX_CFLAGS=
 MOZ_LIBVPX_LIBS=
 
@@ -2827,7 +2923,7 @@ if test -z "$MOZ_SYSTEM_LIBVPX"; then
         dnl These flags are a lie; they're just used to enable the requisite
         dnl opcodes; actual arch detection is done at runtime.
         VPX_ASFLAGS="-march=armv7-a -mfpu=neon"
-        VPX_AS_CONVERSION='$(PERL) $(topsrcdir)/media/libvpx/build/make/ads2gas.pl'
+        VPX_AS_CONVERSION='$(PERL) $(topsrcdir)/media/libvpx/libvpx/build/make/ads2gas.pl'
         VPX_ARM_ASM=1
         dnl Building with -mfpu=neon requires either the "softfp" or the
         dnl "hardfp" ABI. Depending on the compiler's default target, and the
@@ -3379,13 +3475,6 @@ if test -n "$MOZ_USE_NATIVE_POPUP_WINDOWS"; then
   AC_DEFINE(MOZ_USE_NATIVE_POPUP_WINDOWS)
 fi
 
-if test -n "$MOZ_TREE_FREETYPE"; then
-   MOZ_ENABLE_CAIRO_FT=1
-   FT_FONT_FEATURE="#define CAIRO_HAS_FT_FONT 1"
-   CAIRO_FT_CFLAGS="-I$_topsrcdir/modules/freetype2/include"
-   AC_SUBST_LIST(CAIRO_FT_CFLAGS)
-fi
-
 AC_CHECK_PROGS(WGET, wget, "")
 AC_SUBST(WGET)
 
@@ -3839,23 +3928,6 @@ if test -n "$COMPILE_ENVIRONMENT" -a -n "$USE_ELF_HACK"; then
         fi
     fi
 fi # COMPILE_ENVIRONMENT and others.
-
-dnl ========================================================
-dnl = libstdc++ compatibility hacks
-dnl ========================================================
-
-STDCXX_COMPAT=
-MOZ_ARG_ENABLE_BOOL(stdcxx-compat,
-[  --enable-stdcxx-compat  Enable compatibility with older libstdc++],
-    STDCXX_COMPAT=1)
-
-if test -n "$STDCXX_COMPAT"; then
-   eval $(CXX="$CXX" HOST_CXX="$HOST_CXX" $PYTHON -m mozbuild.configure.libstdcxx)
-   AC_SUBST(MOZ_LIBSTDCXX_TARGET_VERSION)
-   AC_SUBST(MOZ_LIBSTDCXX_HOST_VERSION)
-   CXXFLAGS="$CXXFLAGS -D_GLIBCXX_USE_CXX11_ABI=0"
-   HOST_CXXFLAGS="$HOST_CXXFLAGS -D_GLIBCXX_USE_CXX11_ABI=0"
-fi
 
 dnl ========================================================
 dnl = frontend JS debug mode
@@ -4405,8 +4477,9 @@ AC_SUBST_LIST(GLIB_GMODULE_LIBS)
 if test "$USE_FC_FREETYPE"; then
     if test "$COMPILE_ENVIRONMENT"; then
         dnl ========================================================
-        dnl = Check for freetype2 functionality
+        dnl = Check for freetype2 and its functionality
         dnl ========================================================
+        PKG_CHECK_MODULES(FT2, freetype2 >= 6.1.0, _HAVE_FREETYPE2=1, _HAVE_FREETYPE2=)
         if test "$_HAVE_FREETYPE2" -a -z "$MOZ_TREE_FREETYPE"; then
             _SAVE_LIBS="$LIBS"
             _SAVE_CFLAGS="$CFLAGS"
@@ -4442,7 +4515,15 @@ if test "$USE_FC_FREETYPE"; then
         MOZ_CHECK_HEADERS([fontconfig/fcfreetype.h], ,
             [AC_MSG_ERROR(Can't find header fontconfig/fcfreetype.h.)], [#include <fontconfig/fontconfig.h>])
         CPPFLAGS="$_SAVE_CPPFLAGS"
+    else
+        AC_DEFINE(HAVE_FONTCONFIG_FCFREETYPE_H)
     fi
+
+    PKG_CHECK_MODULES(_FONTCONFIG, fontconfig >= $FONTCONFIG_VERSION,
+    [
+        FT2_CFLAGS="$FT2_CFLAGS $_FONTCONFIG_CFLAGS"
+        FT2_LIBS="$FT2_LIBS $_FONTCONFIG_LIBS"
+    ])
 fi
 
 dnl ========================================================
@@ -4500,6 +4581,7 @@ if test "$MOZ_TREE_CAIRO"; then
         FT_FONT_FEATURE="#define CAIRO_HAS_FT_FONT 1"
         MOZ_ENABLE_CAIRO_FT=1
         CAIRO_FT_CFLAGS="$FT2_CFLAGS"
+        AC_SUBST_LIST(CAIRO_FT_CFLAGS)
     fi
 
     case "$MOZ_WIDGET_TOOLKIT" in
@@ -4743,6 +4825,37 @@ AC_DEFINE_UNQUOTED(MOZ_MACBUNDLE_ID,$MOZ_MACBUNDLE_ID)
 AC_SUBST(MOZ_MACBUNDLE_ID)
 
 dnl ========================================================
+dnl = Mac bundle codesign entitlements
+dnl ========================================================
+MOZ_ARG_WITH_STRING(macbundle-entitlement,
+[  --with-macbundle-entitlement=entitlementname
+                          Entitlements to add to the Mac application bundle],
+[ MOZ_MACBUNDLE_ENTITLEMENT="$withval"])
+
+AC_SUBST(MOZ_MACBUNDLE_ENTITLEMENT)
+
+dnl ========================================================
+dnl = Mac bundle codesign identity
+dnl ========================================================
+MOZ_ARG_WITH_STRING(macbundle-identity,
+[  --with-macbundle-identity=identity
+                          Identity to codesign the Mac application bundle],
+[ MOZ_MACBUNDLE_IDENTITY="$withval"])
+
+AC_SUBST(MOZ_MACBUNDLE_IDENTITY)
+
+dnl ========================================================
+dnl = Mac bundle DMG type
+dnl ========================================================
+MOZ_ARG_WITH_STRING(macbundle-type,
+[  --with-macbundle-type=hybrid
+                          Method to use to create the DMG],
+[ MOZ_MACBUNDLE_TYPE="$withval"])
+
+AC_SUBST(MOZ_MACBUNDLE_TYPE)
+
+
+dnl ========================================================
 dnl = Child Process Name for IPC
 dnl ========================================================
 MOZ_CHILD_PROCESS_NAME="plugin-container${BIN_SUFFIX}"
@@ -4854,11 +4967,17 @@ AC_SUBST(WIN32_REDIST_DIR)
 AC_SUBST(WIN_UCRT_REDIST_DIR)
 
 dnl ========================================================
-dnl ICU Support
+dnl ICU Shared Library Support
 dnl ========================================================
 
-if test "$MOZ_WIDGET_TOOLKIT" = "cocoa"; then
-    USE_ICU=1
+MOZ_ARG_ENABLE_BOOL(shared-icu,
+[  --enable-shared-icu           Build ICU as a shared library],
+    MOZ_SHARED_ICU=1,
+    MOZ_SHARED_ICU=)
+
+# We want shared ICU to always be enabled on Windows regardless of the enable bool.
+if test "$OS_ARCH" = "WINNT"; then
+  MOZ_SHARED_ICU=1
 fi
 
 MOZ_CONFIG_ICU()
@@ -4866,10 +4985,12 @@ MOZ_CONFIG_ICU()
 dnl Echo the CFLAGS to remove extra whitespace.
 CFLAGS=`echo \
     $_WARNINGS_CFLAGS \
+    $_COMPILATION_CFLAGS \
     $CFLAGS`
 
 CXXFLAGS=`echo \
     $_WARNINGS_CXXFLAGS \
+    $_COMPILATION_CXXFLAGS \
     $CXXFLAGS`
 
 COMPILE_CFLAGS=`echo \
@@ -5109,36 +5230,6 @@ AC_SUBST(NSS_DISABLE_LIBPKIX)
 
 MOZ_CREATE_CONFIG_STATUS()
 
-# Run freetype configure script
-
-if test "$MOZ_TREE_FREETYPE"; then
-   export CFLAGS="$CFLAGS $MOZ_DEBUG_FLAGS -std=c99"
-   export CPPFLAGS="$CPPFLAGS $MOZ_DEBUG_FLAGS"
-   export CXXFLAGS="$CXXFLAGS $MOZ_DEBUG_FLAGS"
-   export LDFLAGS="$LDFLAGS $MOZ_DEBUG_LDFLAGS"
-   # Spaces in the *_CFLAGS and *_LIBS variables are intentionally placed
-   # to force freetype to use our settings rather than autodetecting
-   if test -n "$MOZ_SYSTEM_PNG"; then
-     export LIBPNG_CFLAGS="$MOZ_PNG_CFLAGS "
-   else
-     export LIBPNG_CFLAGS="-I$_objdir/dist/include"
-   fi
-   export LIBPNG_LIBS="$MOZ_PNG_LIBS "
-   export ZLIB_CFLAGS="$MOZ_ZLIB_CFLAGS "
-   export ZLIB_LIBS="$MOZ_ZLIB_LIBS "
-   export CONFIG_FILES="unix-cc.mk:unix-cc.in unix-def.mk:unix-def.in freetype-config freetype2.pc:freetype2.in"
-   ac_configure_args="$ac_configure_args --host=$target --disable-shared --with-pic=yes --with-zlib=yes --without-bzip2 --with-png=yes --without-harfbuzz"
-
-   if ! test -e modules; then
-     mkdir modules
-   fi
-   # Only export CC, CXX and RANLIB for the subconfigure, and avoid spilling
-   # that further down the road.
-   (export CC CXX RANLIB;
-    AC_OUTPUT_SUBDIRS(modules/freetype2)
-   ) || exit 1
-fi
-
 if test -z "$direct_nspr_config"; then
     dnl ========================================================
     dnl = Setup a nice relatively clean build environment for
@@ -5194,14 +5285,6 @@ RC=
 # Run the SpiderMonkey 'configure' script.
 dist=$MOZ_BUILD_ROOT/dist
 ac_configure_args="$_SUBDIR_CONFIG_ARGS"
-
-# --with-system-nspr will have been converted into the relevant $NSPR_CFLAGS
-# and $NSPR_LIBS.
-ac_configure_args="`echo $ac_configure_args | sed -e 's/--with-system-nspr\S* *//'`"
-
-if test "$_INTL_API" = no; then
-    ac_configure_args="$ac_configure_args --without-intl-api"
-fi
 
 if test -n "$NSPR_CFLAGS" -o -n "$NSPR_LIBS"; then
     ac_configure_args="$ac_configure_args --with-nspr-cflags='$NSPR_CFLAGS'"

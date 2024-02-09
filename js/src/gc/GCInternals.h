@@ -14,6 +14,7 @@
 #include "gc/Zone.h"
 #include "vm/HelperThreads.h"
 #include "vm/Runtime.h"
+#include "vm/BigIntType.h"
 
 namespace js {
 namespace gc {
@@ -71,10 +72,12 @@ struct MovingTracer : JS::CallbackTracer
     void onObjectEdge(JSObject** objp) override;
     void onShapeEdge(Shape** shapep) override;
     void onStringEdge(JSString** stringp) override;
+    void onBigIntEdge(JS::BigInt** bip) override;
     void onScriptEdge(JSScript** scriptp) override;
     void onLazyScriptEdge(LazyScript** lazyp) override;
     void onBaseShapeEdge(BaseShape** basep) override;
     void onScopeEdge(Scope** basep) override;
+    void onRegExpSharedEdge(RegExpShared** sharedp) override;
     void onChild(const JS::GCCellPtr& thing) override {
         MOZ_ASSERT(!RelocationOverlay::isCellForwarded(thing.asCell()));
     }
@@ -82,6 +85,10 @@ struct MovingTracer : JS::CallbackTracer
 #ifdef DEBUG
     TracerKind getTracerKind() const override { return TracerKind::Moving; }
 #endif
+
+  private:
+    template <typename T>
+    void updateEdge(T** thingp);
 };
 
 // Structure for counting how many times objects in a particular group have

@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -150,21 +149,7 @@ FFmpegAudioDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample)
     }
 #else
 #define AVRESULT_OK 0
-
-    int ret = mLib->avcodec_receive_frame(mCodecContext, mFrame);
-    switch (ret) {
-      case AVRESULT_OK:
-        decoded = true;
-        break;
-      case AVERROR(EAGAIN):
-        break;
-      case AVERROR_EOF: {
-        FFMPEG_LOG("End of stream.");
-        return MediaResult(NS_ERROR_DOM_MEDIA_END_OF_STREAM,
-                           RESULT_DETAIL("End of stream"));
-      }
-    }
-    ret = mLib->avcodec_send_packet(mCodecContext, &packet);
+    int ret = mLib->avcodec_send_packet(mCodecContext, &packet);
     switch (ret) {
       case AVRESULT_OK:
         bytesConsumed = packet.size;
@@ -179,6 +164,20 @@ FFmpegAudioDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample)
         NS_WARNING("FFmpeg audio decoder error.");
         return MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
                            RESULT_DETAIL("FFmpeg audio error"));
+    }
+
+    ret = mLib->avcodec_receive_frame(mCodecContext, mFrame);
+    switch (ret) {
+      case AVRESULT_OK:
+        decoded = true;
+        break;
+      case AVERROR(EAGAIN):
+        break;
+      case AVERROR_EOF: {
+        FFMPEG_LOG("End of stream.");
+        return MediaResult(NS_ERROR_DOM_MEDIA_END_OF_STREAM,
+                           RESULT_DETAIL("End of stream"));
+      }
     }
 #endif
 

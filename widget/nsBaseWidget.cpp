@@ -35,7 +35,9 @@
 #include "nsXULPopupManager.h"
 #include "nsIWidgetListener.h"
 #include "nsIGfxInfo.h"
+#ifdef MOZ_ENABLE_NPAPI
 #include "npapi.h"
+#endif
 #include "X11UndefineNone.h"
 #include "base/thread.h"
 #include "prdtoa.h"
@@ -2131,6 +2133,16 @@ nsBaseWidget::UpdateSynthesizedTouchState(MultiTouchInput* aState,
   }
 
   return inputToDispatch;
+}
+
+nsresult
+nsBaseWidget::AsyncEnableDragDrop(bool aEnable)
+{
+  RefPtr<nsBaseWidget> kungFuDeathGrip = this;
+  return NS_IdleDispatchToCurrentThread(
+    NS_NewRunnableFunction([this, aEnable, kungFuDeathGrip]() {
+                             EnableDragDrop(aEnable);
+                           }));
 }
 
 void

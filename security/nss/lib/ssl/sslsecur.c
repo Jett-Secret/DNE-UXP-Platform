@@ -15,6 +15,7 @@
 #include "pk11func.h" /* for PK11_GenerateRandom */
 #include "nss.h"      /* for NSS_RegisterShutdown */
 #include "prinit.h"   /* for PR_CallOnceWithArg */
+#include "tls13psk.h"
 
 /* Step through the handshake functions.
  *
@@ -172,7 +173,18 @@ SSL_ResetHandshake(PRFileDesc *s, PRBool asServer)
     ssl_Release1stHandshakeLock(ss);
 
     ssl3_DestroyRemoteExtensions(&ss->ssl3.hs.remoteExtensions);
+    ssl3_DestroyRemoteExtensions(&ss->ssl3.hs.echOuterExtensions);
     ssl3_ResetExtensionData(&ss->xtnData, ss);
+    tls13_ResetHandshakePsks(ss, &ss->ssl3.hs.psks);
+
+    if (ss->ssl3.hs.echHpkeCtx) {
+        PK11_HPKE_DestroyContext(ss->ssl3.hs.echHpkeCtx, PR_TRUE);
+        ss->ssl3.hs.echHpkeCtx = NULL;
+        PORT_Assert(ss->ssl3.hs.echPublicName);
+        PORT_Free((void *)ss->ssl3.hs.echPublicName); /* CONST */
+        ss->ssl3.hs.echPublicName = NULL;
+        sslBuffer_Clear(&ss->ssl3.hs.greaseEchBuf);
+    }
 
     if (!ss->TCPconnected)
         ss->TCPconnected = (PR_SUCCESS == ssl_DefGetpeername(ss, &addr));
@@ -441,7 +453,12 @@ ssl_SendSavedWriteData(sslSocket *ss)
         if (rv < 0) {
             return rv;
         }
-        ss->pendingBuf.len -= rv;
+        if (rv > ss->pendingBuf.len) {
+            PORT_Assert(0); /* This shouldn't happen */
+            ss->pendingBuf.len = 0;
+        } else {
+            ss->pendingBuf.len -= rv;
+        }
         if (ss->pendingBuf.len > 0 && rv > 0) {
             /* UGH !! This shifts the whole buffer down by copying it */
             PORT_Memmove(ss->pendingBuf.buf, ss->pendingBuf.buf + rv,

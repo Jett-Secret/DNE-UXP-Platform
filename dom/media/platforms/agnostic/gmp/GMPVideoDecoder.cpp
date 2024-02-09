@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -312,11 +311,10 @@ GMPVideoDecoder::Init()
   nsTArray<nsCString> tags;
   InitTags(tags);
   UniquePtr<GetGMPVideoDecoderCallback> callback(new GMPInitDoneCallback(this));
-  if (NS_FAILED(mMPS->GetDecryptingGMPVideoDecoder(mCrashHelper,
-                                                   &tags,
-                                                   GetNodeId(),
-                                                   Move(callback),
-                                                   DecryptorId()))) {
+  if (NS_FAILED(mMPS->GetGMPVideoDecoder(mCrashHelper,
+                                         &tags,
+                                         GetNodeId(),
+                                         Move(callback)))) {
     mInitPromise.Reject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
   }
 

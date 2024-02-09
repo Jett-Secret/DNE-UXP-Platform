@@ -43,14 +43,11 @@
 
 #include "builtin/AtomicsObject.h"
 #include "builtin/Eval.h"
-#include "builtin/Intl.h"
 #include "builtin/MapObject.h"
 #include "builtin/Promise.h"
 #include "builtin/RegExp.h"
+#include "builtin/Stream.h"
 #include "builtin/SymbolObject.h"
-#ifdef ENABLE_SIMD
-# include "builtin/SIMD.h"
-#endif
 #ifdef ENABLE_BINARYDATA
 # include "builtin/TypedObject.h"
 #endif
@@ -390,36 +387,6 @@ JS_TypeOfValue(JSContext* cx, HandleValue value)
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, value);
     return TypeOfValue(value);
-}
-
-JS_PUBLIC_API(bool)
-JS_StrictlyEqual(JSContext* cx, HandleValue value1, HandleValue value2, bool* equal)
-{
-    AssertHeapIsIdle(cx);
-    CHECK_REQUEST(cx);
-    assertSameCompartment(cx, value1, value2);
-    MOZ_ASSERT(equal);
-    return StrictlyEqual(cx, value1, value2, equal);
-}
-
-JS_PUBLIC_API(bool)
-JS_LooselyEqual(JSContext* cx, HandleValue value1, HandleValue value2, bool* equal)
-{
-    AssertHeapIsIdle(cx);
-    CHECK_REQUEST(cx);
-    assertSameCompartment(cx, value1, value2);
-    MOZ_ASSERT(equal);
-    return LooselyEqual(cx, value1, value2, equal);
-}
-
-JS_PUBLIC_API(bool)
-JS_SameValue(JSContext* cx, HandleValue value1, HandleValue value2, bool* same)
-{
-    AssertHeapIsIdle(cx);
-    CHECK_REQUEST(cx);
-    assertSameCompartment(cx, value1, value2);
-    MOZ_ASSERT(same);
-    return SameValue(cx, value1, value2, same);
 }
 
 JS_PUBLIC_API(bool)
@@ -984,8 +951,8 @@ LookupStdName(const JSAtomState& names, JSAtom* name, const JSStdName* table)
  * JSProtoKey does not correspond to a class with a meaningful constructor, we
  * insert a null entry into the table.
  */
-#define STD_NAME_ENTRY(name, code, init, clasp) { EAGER_ATOM(name), static_cast<JSProtoKey>(code) },
-#define STD_DUMMY_ENTRY(name, code, init, dummy) { 0, JSProto_Null },
+#define STD_NAME_ENTRY(name, init, clasp) { EAGER_ATOM(name), JSProto_##name },
+#define STD_DUMMY_ENTRY(name, init, dummy) { 0, JSProto_Null },
 static const JSStdName standard_class_names[] = {
   JS_FOR_PROTOTYPES(STD_NAME_ENTRY, STD_DUMMY_ENTRY)
   { 0, JSProto_LIMIT }
@@ -1274,6 +1241,20 @@ JS::detail::ComputeThis(JSContext* cx, Value* vp)
         return NullValue();
 
     return thisv;
+}
+
+static bool gProfileTimelineRecordingEnabled = false;
+
+JS_PUBLIC_API(void)
+JS::SetProfileTimelineRecordingEnabled(bool enabled)
+{
+    gProfileTimelineRecordingEnabled = enabled;
+}
+
+JS_PUBLIC_API(bool)
+JS::IsProfileTimelineRecordingEnabled()
+{
+    return gProfileTimelineRecordingEnabled;
 }
 
 JS_PUBLIC_API(void*)
@@ -3547,9 +3528,6 @@ CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
 static bool
 IsFunctionCloneable(HandleFunction fun)
 {
-    if (!fun->isInterpreted())
-        return true;
-
     // If a function was compiled with non-global syntactic environments on
     // the environment chain, we could have baked in EnvironmentCoordinates
     // into the script. We cannot clone it without breaking the compiler's
@@ -3587,27 +3565,17 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject env, Handle
             return nullptr;
     }
 
+    if (fun->isNative()) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
+        return nullptr;
+    }
+
     if (!IsFunctionCloneable(fun)) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_CLONE_FUNOBJ_SCOPE);
         return nullptr;
     }
 
     if (fun->isBoundFunction()) {
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
-        return nullptr;
-    }
-
-    if (IsAsmJSModule(fun)) {
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
-        return nullptr;
-    }
-
-    if (IsWrappedAsyncFunction(fun)) {
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
-        return nullptr;
-    }
-
-    if (IsWrappedAsyncGenerator(fun)) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
         return nullptr;
     }
@@ -4190,6 +4158,31 @@ JS::CancelOffThreadModule(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(bool)
+JS::DecodeOffThreadScript(JSContext* cx, const ReadOnlyCompileOptions& options,
+                          mozilla::Vector<uint8_t>& buffer /* TranscodeBuffer& */, size_t cursor,
+                          OffThreadCompileCallback callback, void* callbackData)
+{
+    MOZ_ASSERT(CanCompileOffThread(cx, options, buffer.length() - cursor));
+    return StartOffThreadDecodeScript(cx, options, buffer, cursor, callback, callbackData);
+}
+
+JS_PUBLIC_API(JSScript*)
+JS::FinishOffThreadScriptDecoder(JSContext* cx, void* token)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx));
+    return HelperThreadState().finishScriptDecodeTask(cx, token);
+}
+
+JS_PUBLIC_API(void)
+JS::CancelOffThreadScriptDecoder(JSContext* cx, void* token)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx));
+    HelperThreadState().cancelParseTask(cx, ParseTaskKind::ScriptDecode, token);
+}
+
+JS_PUBLIC_API(bool)
 JS_CompileScript(JSContext* cx, const char* ascii, size_t length,
                  const JS::CompileOptions& options, MutableHandleScript script)
 {
@@ -4327,7 +4320,7 @@ CompileFunction(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
     return true;
 }
 
-static MOZ_MUST_USE bool
+[[nodiscard]] static bool
 BuildFunctionString(const char* name, size_t nameLen,
                     unsigned nargs, const char* const* argnames,
                     const SourceBufferHolder& srcBuf, StringBuffer* out,
@@ -4390,7 +4383,7 @@ JS::CompileFunction(JSContext* cx, AutoObjectVector& envChain,
             return false;
 
         // If name is not valid identifier
-        if (!js::frontend::IsIdentifier(name, nameLen))
+        if (!js::frontend::IsIdentifier(reinterpret_cast<const Latin1Char*>(name), nameLen))
             isInvalidName = true;
     }
 
@@ -4684,6 +4677,43 @@ JS::SetModuleResolveHook(JSRuntime* rt, JS::ModuleResolveHook func)
     rt->moduleResolveHook = func;
 }
 
+JS_PUBLIC_API(JS::ModuleMetadataHook)
+JS::GetModuleMetadataHook(JSContext* cx)
+{
+    AssertHeapIsIdle(cx);
+    return cx->runtime()->moduleMetadataHook;
+}
+
+JS_PUBLIC_API(void)
+JS::SetModuleMetadataHook(JSContext* cx, JS::ModuleMetadataHook func)
+{
+    AssertHeapIsIdle(cx);
+    cx->runtime()->moduleMetadataHook = func;
+}
+
+JS_PUBLIC_API(JS::ModuleDynamicImportHook)
+JS::GetModuleDynamicImportHook(JSContext* cx)
+{
+    AssertHeapIsIdle(cx);
+    return cx->runtime()->moduleDynamicImportHook;
+}
+
+JS_PUBLIC_API(void)
+JS::SetModuleDynamicImportHook(JSContext* cx, JS::ModuleDynamicImportHook func)
+{
+    AssertHeapIsIdle(cx);
+    cx->runtime()->moduleDynamicImportHook = func;
+}
+
+JS_PUBLIC_API(bool)
+JS::FinishDynamicModuleImport(JSContext* cx, HandleValue referencingPrivate, HandleString specifier,
+                              HandleObject promise)
+{
+    AssertHeapIsIdle(cx);
+
+    return js::FinishDynamicModuleImport(cx, referencingPrivate, specifier, promise);
+}
+
 JS_PUBLIC_API(bool)
 JS::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
                   SourceBufferHolder& srcBuf, JS::MutableHandleObject module)
@@ -4697,15 +4727,52 @@ JS::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(void)
-JS::SetModuleHostDefinedField(JSObject* module, const JS::Value& value)
+JS::SetModulePrivate(JSObject* module, const JS::Value& value)
 {
-    module->as<ModuleObject>().setHostDefinedField(value);
+    JSRuntime* rt = module->compartment()->runtimeFromMainThread();
+    module->as<ModuleObject>().scriptSourceObject()->setPrivate(rt, value);
 }
 
 JS_PUBLIC_API(JS::Value)
-JS::GetModuleHostDefinedField(JSObject* module)
+JS::GetModulePrivate(JSObject* module)
 {
-    return module->as<ModuleObject>().hostDefinedField();
+    return module->as<ModuleObject>().scriptSourceObject()->canonicalPrivate();
+}
+
+JS_PUBLIC_API(void)
+JS::SetScriptPrivate(JSScript* script, const JS::Value& value)
+{
+    JSRuntime* rt = script->compartment()->runtimeFromMainThread();
+    script->scriptSourceUnwrap().setPrivate(rt, value);
+}
+
+JS_PUBLIC_API(JS::Value)
+JS::GetScriptPrivate(JSScript* script)
+{
+    return script->scriptSourceUnwrap().canonicalPrivate();
+}
+
+JS_PUBLIC_API(JS::Value)
+JS::GetScriptedCallerPrivate(JSContext* cx)
+{
+  AssertHeapIsIdle(cx);
+  CHECK_REQUEST(cx);
+
+  NonBuiltinFrameIter iter(cx, cx->compartment()->principals());
+  if (iter.done() || !iter.hasScript()) {
+    return UndefinedValue();
+  }
+
+  return FindScriptOrModulePrivateForScript(iter.script());
+}
+
+JS_PUBLIC_API(void)
+JS::SetScriptPrivateReferenceHooks(JSContext* cx, JS::ScriptPrivateReferenceHook addRefHook,
+                                   JS::ScriptPrivateReferenceHook releaseHook)
+{
+  AssertHeapIsIdle(cx);
+  cx->runtime()->scriptPrivateAddRefHook = addRefHook;
+  cx->runtime()->scriptPrivateReleaseHook = releaseHook;
 }
 
 JS_PUBLIC_API(bool)
@@ -4825,11 +4892,14 @@ JS_PUBLIC_API(JSObject*)
 JS::NewPromiseObject(JSContext* cx, HandleObject executor, HandleObject proto /* = nullptr */)
 {
     MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
-    MOZ_ASSERT(IsCallable(executor));
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, executor, proto);
 
+    if (!executor)
+        return PromiseObject::createSkippingExecutor(cx);
+
+    MOZ_ASSERT(IsCallable(executor));
     return PromiseObject::create(cx, executor, proto);
 }
 
@@ -4879,10 +4949,29 @@ JS::GetPromiseResult(JS::HandleObject promiseObj)
     return promise->state() == JS::PromiseState::Fulfilled ? promise->value() : promise->reason();
 }
 
+JS_PUBLIC_API(bool)
+JS::GetPromiseIsHandled(JS::HandleObject promise)
+{
+    PromiseObject* promiseObj = &promise->as<PromiseObject>();
+    return !promiseObj->isUnhandled();
+}
+
 JS_PUBLIC_API(JSObject*)
 JS::GetPromiseAllocationSite(JS::HandleObject promise)
 {
     return promise->as<PromiseObject>().allocationSite();
+}
+
+JS_PUBLIC_API(bool)
+JS::GetPromiseIsReported(JS::HandleObject promise)
+{
+    return promise->as<PromiseObject>().isReported();
+}
+
+JS_PUBLIC_API(void)
+JS::MarkPromiseRejectionReported(JS::HandleObject promise)
+{
+    return promise->as<PromiseObject>().markAsReported();
 }
 
 JS_PUBLIC_API(JSObject*)
@@ -4980,7 +5069,8 @@ JS::RejectPromise(JSContext* cx, JS::HandleObject promiseObj, JS::HandleValue re
 static bool
 CallOriginalPromiseThenImpl(JSContext* cx, JS::HandleObject promiseObj,
                             JS::HandleObject onResolvedObj_, JS::HandleObject onRejectedObj_,
-                            JS::MutableHandleObject resultObj, bool createDependent)
+                            JS::MutableHandleObject resultObj,
+                            CreateDependentPromise createDependent)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
@@ -5022,7 +5112,6 @@ CallOriginalPromiseThenImpl(JSContext* cx, JS::HandleObject promiseObj,
             return false;
     }
     return true;
-
 }
 
 JS_PUBLIC_API(JSObject*)
@@ -5030,8 +5119,11 @@ JS::CallOriginalPromiseThen(JSContext* cx, JS::HandleObject promiseObj,
                             JS::HandleObject onResolvedObj, JS::HandleObject onRejectedObj)
 {
     RootedObject resultPromise(cx);
-    if (!CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj, &resultPromise, true))
+    if (!CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj, &resultPromise,
+                                     CreateDependentPromise::Always))
+    {
         return nullptr;
+    }
     return resultPromise;
 }
 
@@ -5040,7 +5132,8 @@ JS::AddPromiseReactions(JSContext* cx, JS::HandleObject promiseObj,
                         JS::HandleObject onResolvedObj, JS::HandleObject onRejectedObj)
 {
     RootedObject resultPromise(cx);
-    bool result = CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj, &resultPromise, false);
+    bool result = CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj,
+                                              &resultPromise, CreateDependentPromise::Never);
     MOZ_ASSERT(!resultPromise);
     return result;
 }
@@ -5049,7 +5142,7 @@ JS::AddPromiseReactions(JSContext* cx, JS::HandleObject promiseObj,
  * Unforgeable version of Promise.all for internal use.
  *
  * Takes a dense array of Promise objects and returns a promise that's
- * resolved with an array of resolution values when all those promises ahve
+ * resolved with an array of resolution values when all those promises have
  * been resolved, or rejected with the rejection value of the first rejected
  * promise.
  *
@@ -5062,6 +5155,368 @@ JS::GetWaitForAllPromise(JSContext* cx, const JS::AutoObjectVector& promises)
     CHECK_REQUEST(cx);
 
     return js::GetWaitForAllPromise(cx, promises);
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::NewReadableDefaultStreamObject(JSContext* cx,
+                                   JS::HandleObject underlyingSource /* = nullptr */,
+                                   JS::HandleFunction size /* = nullptr */,
+                                   double highWaterMark /* = 1 */,
+                                   JS::HandleObject proto /* = nullptr */)
+{
+    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+
+    RootedObject source(cx, underlyingSource);
+    if (!source) {
+        source = NewBuiltinClassInstance<PlainObject>(cx);
+        if (!source)
+            return nullptr;
+    }
+    RootedValue sourceVal(cx, ObjectValue(*source));
+    RootedValue sizeVal(cx, size ? ObjectValue(*size) : UndefinedValue());
+    RootedValue highWaterMarkVal(cx, NumberValue(highWaterMark));
+    return ReadableStream::createDefaultStream(cx, sourceVal, sizeVal, highWaterMarkVal, proto);
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::NewReadableByteStreamObject(JSContext* cx,
+                                JS::HandleObject underlyingSource /* = nullptr */,
+                                double highWaterMark /* = 1 */,
+                                JS::HandleObject proto /* = nullptr */)
+{
+    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+
+    RootedObject source(cx, underlyingSource);
+    if (!source) {
+        source = NewBuiltinClassInstance<PlainObject>(cx);
+        if (!source)
+            return nullptr;
+    }
+    RootedValue sourceVal(cx, ObjectValue(*source));
+    RootedValue highWaterMarkVal(cx, NumberValue(highWaterMark));
+    return ReadableStream::createByteStream(cx, sourceVal, highWaterMarkVal, proto);
+}
+
+extern JS_PUBLIC_API(void)
+JS::SetReadableStreamCallbacks(JSContext* cx,
+                               JS::RequestReadableStreamDataCallback dataRequestCallback,
+                               JS::WriteIntoReadRequestBufferCallback writeIntoReadRequestCallback,
+                               JS::CancelReadableStreamCallback cancelCallback,
+                               JS::ReadableStreamClosedCallback closedCallback,
+                               JS::ReadableStreamErroredCallback erroredCallback,
+                               JS::ReadableStreamFinalizeCallback finalizeCallback)
+{
+    MOZ_ASSERT(dataRequestCallback);
+    MOZ_ASSERT(writeIntoReadRequestCallback);
+    MOZ_ASSERT(cancelCallback);
+    MOZ_ASSERT(closedCallback);
+    MOZ_ASSERT(erroredCallback);
+    MOZ_ASSERT(finalizeCallback);
+
+    JSRuntime* rt = cx->runtime();
+
+    MOZ_ASSERT(!rt->readableStreamDataRequestCallback);
+    MOZ_ASSERT(!rt->readableStreamWriteIntoReadRequestCallback);
+    MOZ_ASSERT(!rt->readableStreamCancelCallback);
+    MOZ_ASSERT(!rt->readableStreamClosedCallback);
+    MOZ_ASSERT(!rt->readableStreamErroredCallback);
+    MOZ_ASSERT(!rt->readableStreamFinalizeCallback);
+
+    rt->readableStreamDataRequestCallback = dataRequestCallback;
+    rt->readableStreamWriteIntoReadRequestCallback = writeIntoReadRequestCallback;
+    rt->readableStreamCancelCallback = cancelCallback;
+    rt->readableStreamClosedCallback = closedCallback;
+    rt->readableStreamErroredCallback = erroredCallback;
+    rt->readableStreamFinalizeCallback = finalizeCallback;
+}
+
+JS_PUBLIC_API(bool)
+JS::HasReadableStreamCallbacks(JSContext* cx)
+{
+    return cx->runtime()->readableStreamDataRequestCallback;
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::NewReadableExternalSourceStreamObject(JSContext* cx, void* underlyingSource,
+                                          uint8_t flags /* = 0 */,
+                                          HandleObject proto /* = nullptr */)
+{
+    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+
+#ifdef DEBUG
+    JSRuntime* rt = cx->runtime();
+    MOZ_ASSERT(rt->readableStreamDataRequestCallback);
+    MOZ_ASSERT(rt->readableStreamWriteIntoReadRequestCallback);
+    MOZ_ASSERT(rt->readableStreamCancelCallback);
+    MOZ_ASSERT(rt->readableStreamClosedCallback);
+    MOZ_ASSERT(rt->readableStreamErroredCallback);
+    MOZ_ASSERT(rt->readableStreamFinalizeCallback);
+#endif // DEBUG
+
+    return ReadableStream::createExternalSourceStream(cx, underlyingSource, flags, proto);
+}
+
+JS_PUBLIC_API(uint8_t)
+JS::ReadableStreamGetEmbeddingFlags(const JSObject* stream)
+{
+    return stream->as<ReadableStream>().embeddingFlags();
+}
+
+JS_PUBLIC_API(bool)
+JS::IsReadableStream(const JSObject* obj)
+{
+    return obj->is<ReadableStream>();
+}
+
+JS_PUBLIC_API(bool)
+JS::IsReadableStreamReader(const JSObject* obj)
+{
+    return obj->is<ReadableStreamDefaultReader>() || obj->is<ReadableStreamBYOBReader>();
+}
+
+JS_PUBLIC_API(bool)
+JS::IsReadableStreamDefaultReader(const JSObject* obj)
+{
+    return obj->is<ReadableStreamDefaultReader>();
+}
+
+JS_PUBLIC_API(bool)
+JS::IsReadableStreamBYOBReader(const JSObject* obj)
+{
+    return obj->is<ReadableStreamBYOBReader>();
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamIsReadable(const JSObject* stream)
+{
+    return stream->as<ReadableStream>().readable();
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamIsLocked(const JSObject* stream)
+{
+    return stream->as<ReadableStream>().locked();
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamIsDisturbed(const JSObject* stream)
+{
+    return stream->as<ReadableStream>().disturbed();
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::ReadableStreamCancel(JSContext* cx, HandleObject streamObj, HandleValue reason)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+    assertSameCompartment(cx, reason);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    return ReadableStream::cancel(cx, stream, reason);
+}
+
+JS_PUBLIC_API(JS::ReadableStreamMode)
+JS::ReadableStreamGetMode(const JSObject* stream)
+{
+    return stream->as<ReadableStream>().mode();
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::ReadableStreamGetReader(JSContext* cx, HandleObject streamObj, ReadableStreamReaderMode mode)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    return ReadableStream::getReader(cx, stream, mode);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamGetExternalUnderlyingSource(JSContext* cx, HandleObject streamObj, void** source)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    return ReadableStream::getExternalSource(cx, stream, source);
+}
+
+JS_PUBLIC_API(void)
+JS::ReadableStreamReleaseExternalUnderlyingSource(JSObject* stream)
+{
+    stream->as<ReadableStream>().releaseExternalSource();
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamUpdateDataAvailableFromSource(JSContext* cx, JS::HandleObject streamObj,
+                                                uint32_t availableData)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    return ReadableStream::updateDataAvailableFromSource(cx, stream, availableData);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamTee(JSContext* cx, HandleObject streamObj,
+                      MutableHandleObject branch1Obj, MutableHandleObject branch2Obj)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    Rooted<ReadableStream*> branch1Stream(cx);
+    Rooted<ReadableStream*> branch2Stream(cx);
+
+    if (!ReadableStream::tee(cx, stream, false, &branch1Stream, &branch2Stream))
+        return false;
+
+    branch1Obj.set(branch1Stream);
+    branch2Obj.set(branch2Stream);
+
+    return true;
+}
+
+JS_PUBLIC_API(void)
+JS::ReadableStreamGetDesiredSize(JSObject* streamObj, bool* hasValue, double* value)
+{
+    streamObj->as<ReadableStream>().desiredSize(hasValue, value);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamClose(JSContext* cx, HandleObject streamObj)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    return ReadableStream::close(cx, stream);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamEnqueue(JSContext* cx, HandleObject streamObj, HandleValue chunk)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+    assertSameCompartment(cx, chunk);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    if (stream->mode() != JS::ReadableStreamMode::Default) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                  JSMSG_READABLESTREAM_NOT_DEFAULT_CONTROLLER,
+                                  "JS::ReadableStreamEnqueue");
+        return false;
+    }
+    return ReadableStream::enqueue(cx, stream, chunk);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableByteStreamEnqueueBuffer(JSContext* cx, HandleObject streamObj, HandleObject chunkObj)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+    assertSameCompartment(cx, chunkObj);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    if (stream->mode() != JS::ReadableStreamMode::Byte) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                  JSMSG_READABLESTREAM_NOT_BYTE_STREAM_CONTROLLER,
+                                  "JS::ReadableByteStreamEnqueueBuffer");
+        return false;
+    }
+
+    Rooted<ArrayBufferObject*> buffer(cx);
+    if (chunkObj->is<ArrayBufferViewObject>()) {
+        bool dummy;
+        buffer = &JS_GetArrayBufferViewBuffer(cx, chunkObj, &dummy)->as<ArrayBufferObject>();
+    } else if (chunkObj->is<ArrayBufferObject>()) {
+        buffer = &chunkObj->as<ArrayBufferObject>();
+    } else {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                  JSMSG_READABLEBYTESTREAMCONTROLLER_BAD_CHUNK,
+                                  "JS::ReadableByteStreamEnqueueBuffer");
+        return false;
+    }
+
+    return ReadableStream::enqueueBuffer(cx, stream, buffer);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamError(JSContext* cx, HandleObject streamObj, HandleValue error)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, streamObj);
+    assertSameCompartment(cx, error);
+
+    Rooted<ReadableStream*> stream(cx, &streamObj->as<ReadableStream>());
+    return js::ReadableStream::error(cx, stream, error);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamReaderIsClosed(const JSObject* reader)
+{
+    return js::ReadableStreamReaderIsClosed(reader);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamReaderCancel(JSContext* cx, HandleObject reader, HandleValue reason)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, reader);
+    assertSameCompartment(cx, reason);
+
+    return js::ReadableStreamReaderCancel(cx, reader, reason);
+}
+
+JS_PUBLIC_API(bool)
+JS::ReadableStreamReaderReleaseLock(JSContext* cx, HandleObject reader)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, reader);
+
+    return js::ReadableStreamReaderReleaseLock(cx, reader);
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::ReadableStreamDefaultReaderRead(JSContext* cx, HandleObject readerObj)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, readerObj);
+
+    Rooted<ReadableStreamDefaultReader*> reader(cx, &readerObj->as<ReadableStreamDefaultReader>());
+    return js::ReadableStreamDefaultReader::read(cx, reader);
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::ReadableStreamBYOBReaderRead(JSContext* cx, HandleObject readerObj, HandleObject viewObj)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, readerObj);
+    assertSameCompartment(cx, viewObj);
+
+    Rooted<ReadableStreamBYOBReader*> reader(cx, &readerObj->as<ReadableStreamBYOBReader>());
+    Rooted<ArrayBufferViewObject*> view(cx, &viewObj->as<ArrayBufferViewObject>());
+    return js::ReadableStreamBYOBReader::read(cx, reader, view);
 }
 
 JS_PUBLIC_API(void)
@@ -6127,10 +6582,10 @@ JS_GetRegExpFlags(JSContext* cx, HandleObject obj)
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
 
-    RegExpGuard shared(cx);
+    RootedRegExpShared shared(cx);
     if (!RegExpToShared(cx, obj, &shared))
         return false;
-    return shared.re()->getFlags();
+    return shared->getFlags();
 }
 
 JS_PUBLIC_API(JSString*)
@@ -6139,10 +6594,10 @@ JS_GetRegExpSource(JSContext* cx, HandleObject obj)
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
 
-    RegExpGuard shared(cx);
+    RootedRegExpShared shared(cx);
     if (!RegExpToShared(cx, obj, &shared))
         return nullptr;
-    return shared.re()->getSource();
+    return shared->getSource();
 }
 
 /************************************************************************/
@@ -6205,12 +6660,16 @@ JS_GetPendingException(JSContext* cx, MutableHandleValue vp)
 }
 
 JS_PUBLIC_API(void)
-JS_SetPendingException(JSContext* cx, HandleValue value)
+JS_SetPendingException(JSContext* cx, HandleValue value, JS::ExceptionStackBehavior behavior)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     releaseAssertSameCompartment(cx, value);
-    cx->setPendingException(value);
+    if (behavior == JS::ExceptionStackBehavior::Capture) {
+        cx->setPendingExceptionAndCaptureStack(value);
+    } else {
+        cx->setPendingException(value, nullptr);
+    }
 }
 
 JS_PUBLIC_API(void)
@@ -6220,12 +6679,20 @@ JS_ClearPendingException(JSContext* cx)
     cx->clearPendingException();
 }
 
+JS_PUBLIC_API(JSObject*)
+JS::GetPendingExceptionStack(JSContext* cx)
+{
+  AssertHeapIsIdle(cx);
+  return cx->getPendingExceptionStack();
+}
+
 JS::AutoSaveExceptionState::AutoSaveExceptionState(JSContext* cx)
   : context(cx),
     wasPropagatingForcedReturn(cx->propagatingForcedReturn_),
     wasOverRecursed(cx->overRecursed_),
     wasThrowing(cx->throwing),
-    exceptionValue(cx)
+    exceptionValue(cx),
+    exceptionStack(cx)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
@@ -6235,8 +6702,19 @@ JS::AutoSaveExceptionState::AutoSaveExceptionState(JSContext* cx)
         cx->overRecursed_ = false;
     if (wasThrowing) {
         exceptionValue = cx->unwrappedException_;
+        exceptionStack = cx->unwrappedExceptionStack_;
         cx->clearPendingException();
     }
+}
+
+void
+JS::AutoSaveExceptionState::drop()
+{
+  wasPropagatingForcedReturn = false;
+  wasOverRecursed = false;
+  wasThrowing = false;
+  exceptionValue.setUndefined();
+  exceptionStack = nullptr;
 }
 
 void
@@ -6246,6 +6724,9 @@ JS::AutoSaveExceptionState::restore()
     context->overRecursed_ = wasOverRecursed;
     context->throwing = wasThrowing;
     context->unwrappedException_ = exceptionValue;
+    if (exceptionStack) {
+      context->unwrappedExceptionStack_ = &exceptionStack->as<SavedFrame>();
+    }
     drop();
 }
 
@@ -6258,6 +6739,9 @@ JS::AutoSaveExceptionState::~AutoSaveExceptionState()
             context->overRecursed_ = wasOverRecursed;
             context->throwing = true;
             context->unwrappedException_ = exceptionValue;
+            if (exceptionStack) {
+                context->unwrappedExceptionStack_ = &exceptionStack->as<SavedFrame>();
+            }
         }
     }
 }
@@ -6971,6 +7455,26 @@ JS::DecodeInterpretedFunction(JSContext* cx, TranscodeBuffer& buffer,
     decoder.codeFunction(funp);
     MOZ_ASSERT(bool(funp) == (decoder.resultCode() == TranscodeResult_Ok));
     return decoder.resultCode();
+}
+
+JS_PUBLIC_API(bool)
+JS::StartIncrementalEncoding(JSContext* cx, JS::HandleScript script)
+{
+    if (!script)
+        return false;
+    if (!script->scriptSource()->xdrEncodeTopLevel(cx, script))
+        return false;
+    return true;
+}
+
+JS_PUBLIC_API(bool)
+JS::FinishIncrementalEncoding(JSContext* cx, JS::HandleScript script, TranscodeBuffer& buffer)
+{
+    if (!script)
+        return false;
+    if (!script->scriptSource()->xdrFinalizeEncoder(buffer))
+        return false;
+    return true;
 }
 
 JS_PUBLIC_API(void)

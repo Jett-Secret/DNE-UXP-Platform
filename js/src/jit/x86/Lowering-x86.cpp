@@ -312,10 +312,6 @@ LIRGeneratorX86::visitWasmStore(MWasmStore* ins)
       case Scalar::Int16: case Scalar::Uint16:
       case Scalar::Int32: case Scalar::Uint32:
       case Scalar::Float32: case Scalar::Float64:
-      case Scalar::Float32x4:
-      case Scalar::Int8x16:
-      case Scalar::Int16x8:
-      case Scalar::Int32x4:
         // For now, don't allow constant values. The immediate operand affects
         // instruction layout which affects patching.
         valueAlloc = useRegisterAtStart(ins->value());
@@ -326,6 +322,8 @@ LIRGeneratorX86::visitWasmStore(MWasmStore* ins)
         add(lir, ins);
         return;
       }
+      case Scalar::BigInt64:
+      case Scalar::BigUint64:
       case Scalar::Uint8Clamped:
       case Scalar::MaxTypedArrayViewType:
         MOZ_CRASH("unexpected array type");
@@ -371,10 +369,6 @@ LIRGeneratorX86::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
       case Scalar::Int16: case Scalar::Uint16:
       case Scalar::Int32: case Scalar::Uint32:
       case Scalar::Float32: case Scalar::Float64:
-      case Scalar::Float32x4:
-      case Scalar::Int8x16:
-      case Scalar::Int16x8:
-      case Scalar::Int32x4:
         // For now, don't allow constant values. The immediate operand affects
         // instruction layout which affects patching.
         lir = new (alloc()) LAsmJSStoreHeap(baseAlloc, useRegisterAtStart(ins->value()));
@@ -655,3 +649,14 @@ LIRGeneratorX86::visitExtendInt32ToInt64(MExtendInt32ToInt64* ins)
                                                     LAllocation(AnyRegister(eax))));
     }
 }
+
+void
+LIRGeneratorX86::visitSignExtendInt64(MSignExtendInt64* ins)
+{
+    // Here we'll end up using cdq which requires input and output in (edx,eax).
+    LSignExtendInt64* lir =
+        new(alloc()) LSignExtendInt64(useInt64RegisterAtStart(ins->input()));
+    defineInt64Fixed(lir, ins, LInt64Allocation(LAllocation(AnyRegister(edx)),
+                                                LAllocation(AnyRegister(eax))));
+}
+

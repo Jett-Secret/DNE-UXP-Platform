@@ -102,6 +102,47 @@ nsCSSPseudoClasses::HasNthPairArg(Type aType)
          aType == Type::nthLastOfType;
 }
 
+bool
+nsCSSPseudoClasses::HasSingleSelectorArg(Type aType)
+{
+  return aType == Type::host ||
+         aType == Type::hostContext ||
+         aType == Type::slotted;
+}
+
+bool
+nsCSSPseudoClasses::HasForgivingSelectorListArg(Type aType)
+{
+  return aType == Type::is ||
+         aType == Type::matches ||
+         aType == Type::any ||
+         aType == Type::where;
+}
+
+bool
+nsCSSPseudoClasses::HasSelectorListArg(Type aType)
+{
+  return HasForgivingSelectorListArg(aType) ||
+         aType == Type::negation ||
+         aType == Type::mozAny ||
+         aType == Type::mozAnyPrivate ||
+         aType == Type::host ||
+         aType == Type::hostContext ||
+         aType == Type::slotted;
+}
+
+bool
+nsCSSPseudoClasses::HasOptionalSelectorListArg(Type aType)
+{
+  return aType == Type::host;
+}
+
+bool
+nsCSSPseudoClasses::IsHiddenFromSerialization(Type aType)
+{
+  return aType == Type::mozAnyPrivate;
+}
+
 void
 nsCSSPseudoClasses::PseudoTypeToString(Type aType, nsAString& aString)
 {
@@ -129,4 +170,10 @@ nsCSSPseudoClasses::IsUserActionPseudoClass(Type aType)
   return aType == Type::hover ||
          aType == Type::active ||
          aType == Type::focus;
+}
+
+/* static */ bool
+nsCSSPseudoClasses::IsHybridPseudoElement(Type aType)
+{
+  return aType == Type::slotted;
 }

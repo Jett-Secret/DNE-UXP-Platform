@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: sw=4 ts=4 et :
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -146,6 +145,7 @@ protected:
     virtual bool
     RecvPluginHideWindow(const uint32_t& aWindowId) override;
 
+#ifdef MOZ_ENABLE_NPAPI
     virtual bool
     RecvSetCursor(const NSCursorInfo& aCursorInfo) override;
 
@@ -157,6 +157,7 @@ protected:
 
     virtual bool
     RecvPopCursor() override;
+#endif
 
     virtual bool
     RecvNPN_SetException(const nsCString& aMessage) override;
@@ -170,10 +171,12 @@ protected:
     static BrowserStreamParent* StreamCast(NPP instance, NPStream* s,
                                            PluginAsyncSurrogate** aSurrogate = nullptr);
 
+#ifdef MOZ_ENABLE_NPAPI
     virtual bool
     AnswerNPN_SetValue_NPPVpluginRequiresAudioDeviceChanges(
                                         const bool& shouldRegister,
                                         NPError* result) override;
+#endif
 
 protected:
     void SetChildTimeout(const int32_t aChildTimeout);
@@ -507,10 +510,12 @@ private:
 
     static void CachedSettingChanged(const char* aPref, void* aModule);
 
+#ifdef MOZ_ENABLE_NPAPI
     virtual bool
     AnswerNPN_SetValue_NPPVpluginRequiresAudioDeviceChanges(
                                         const bool& shouldRegister,
                                         NPError* result) override;
+#endif
 
     PluginProcessParent* mSubprocess;
     uint32_t mPluginId;

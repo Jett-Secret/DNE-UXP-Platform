@@ -33,13 +33,16 @@
 #include "jsstr.h"
 
 #include "builtin/Eval.h"
+#include "builtin/ModuleObject.h"
 #include "jit/AtomicOperations.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "jit/IonAnalysis.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
+#include "vm/BigIntType.h"
 #include "vm/Debugger.h"
+#include "vm/EqualityOperations.h"  // js::StrictlyEqual
 #include "vm/GeneratorObject.h"
 #include "vm/Opcodes.h"
 #include "vm/Scope.h"
@@ -454,10 +457,18 @@ js::InternalCallOrConstruct(JSContext* cx, const CallArgs& args, MaybeConstruct 
 
     /* Invoke non-functions. */
     if (MOZ_UNLIKELY(!args.callee().is<JSFunction>())) {
-        MOZ_ASSERT_IF(construct, !args.callee().constructHook());
-        JSNative call = args.callee().callHook();
-        if (!call)
+        MOZ_ASSERT_IF(construct, !args.callee().isConstructor());
+
+        if (!args.callee().isCallable())
             return ReportIsNotFunction(cx, args.calleev(), skipForCallee, construct);
+
+        if (args.callee().is<ProxyObject>()) {
+            RootedObject proxy(cx, &args.callee());
+            return Proxy::call(cx, proxy, args);
+        }
+
+        JSNative call = args.callee().callHook();
+        MOZ_ASSERT(call, "isCallable without a callHook?");
         return CallJSNative(cx, call, args);
     }
 
@@ -574,6 +585,11 @@ InternalConstruct(JSContext* cx, const AnyConstructArgs& args)
 
         MOZ_ASSERT(args.CallArgs::rval().isObject());
         return true;
+    }
+
+    if (callee.is<ProxyObject>()) {
+        RootedObject proxy(cx, &callee);
+        return Proxy::construct(cx, proxy, args);
     }
 
     JSNative construct = callee.constructHook();
@@ -785,170 +801,6 @@ js::HasInstance(JSContext* cx, HandleObject obj, HandleValue v, bool* bp)
     return JS::InstanceofOperator(cx, obj, local, bp);
 }
 
-static inline bool
-EqualGivenSameType(JSContext* cx, HandleValue lval, HandleValue rval, bool* equal)
-{
-    MOZ_ASSERT(SameType(lval, rval));
-
-    if (lval.isString())
-        return EqualStrings(cx, lval.toString(), rval.toString(), equal);
-    if (lval.isDouble()) {
-        *equal = (lval.toDouble() == rval.toDouble());
-        return true;
-    }
-    if (lval.isGCThing()) {  // objects or symbols
-        *equal = (lval.toGCThing() == rval.toGCThing());
-        return true;
-    }
-    *equal = lval.get().payloadAsRawUint32() == rval.get().payloadAsRawUint32();
-    MOZ_ASSERT_IF(lval.isUndefined() || lval.isNull(), *equal);
-    return true;
-}
-
-static inline bool
-LooselyEqualBooleanAndOther(JSContext* cx, HandleValue lval, HandleValue rval, bool* result)
-{
-    MOZ_ASSERT(!rval.isBoolean());
-    RootedValue lvalue(cx, Int32Value(lval.toBoolean() ? 1 : 0));
-
-    // The tail-call would end up in Step 3.
-    if (rval.isNumber()) {
-        *result = (lvalue.toNumber() == rval.toNumber());
-        return true;
-    }
-    // The tail-call would end up in Step 6.
-    if (rval.isString()) {
-        double num;
-        if (!StringToNumber(cx, rval.toString(), &num))
-            return false;
-        *result = (lvalue.toNumber() == num);
-        return true;
-    }
-
-    return LooselyEqual(cx, lvalue, rval, result);
-}
-
-// ES6 draft rev32 7.2.12 Abstract Equality Comparison
-bool
-js::LooselyEqual(JSContext* cx, HandleValue lval, HandleValue rval, bool* result)
-{
-    // Step 3.
-    if (SameType(lval, rval))
-        return EqualGivenSameType(cx, lval, rval, result);
-
-    // Handle int32 x double.
-    if (lval.isNumber() && rval.isNumber()) {
-        *result = (lval.toNumber() == rval.toNumber());
-        return true;
-    }
-
-    // Step 4. This a bit more complex, because of the undefined emulating object.
-    if (lval.isNullOrUndefined()) {
-        // We can return early here, because null | undefined is only equal to the same set.
-        *result = rval.isNullOrUndefined() ||
-                  (rval.isObject() && EmulatesUndefined(&rval.toObject()));
-        return true;
-    }
-
-    // Step 5.
-    if (rval.isNullOrUndefined()) {
-        MOZ_ASSERT(!lval.isNullOrUndefined());
-        *result = lval.isObject() && EmulatesUndefined(&lval.toObject());
-        return true;
-    }
-
-    // Step 6.
-    if (lval.isNumber() && rval.isString()) {
-        double num;
-        if (!StringToNumber(cx, rval.toString(), &num))
-            return false;
-        *result = (lval.toNumber() == num);
-        return true;
-    }
-
-    // Step 7.
-    if (lval.isString() && rval.isNumber()) {
-        double num;
-        if (!StringToNumber(cx, lval.toString(), &num))
-            return false;
-        *result = (num == rval.toNumber());
-        return true;
-    }
-
-    // Step 8.
-    if (lval.isBoolean())
-        return LooselyEqualBooleanAndOther(cx, lval, rval, result);
-
-    // Step 9.
-    if (rval.isBoolean())
-        return LooselyEqualBooleanAndOther(cx, rval, lval, result);
-
-    // Step 10.
-    if ((lval.isString() || lval.isNumber() || lval.isSymbol()) && rval.isObject()) {
-        RootedValue rvalue(cx, rval);
-        if (!ToPrimitive(cx, &rvalue))
-            return false;
-        return LooselyEqual(cx, lval, rvalue, result);
-    }
-
-    // Step 11.
-    if (lval.isObject() && (rval.isString() || rval.isNumber() || rval.isSymbol())) {
-        RootedValue lvalue(cx, lval);
-        if (!ToPrimitive(cx, &lvalue))
-            return false;
-        return LooselyEqual(cx, lvalue, rval, result);
-    }
-
-    // Step 12.
-    *result = false;
-    return true;
-}
-
-bool
-js::StrictlyEqual(JSContext* cx, HandleValue lval, HandleValue rval, bool* equal)
-{
-    if (SameType(lval, rval))
-        return EqualGivenSameType(cx, lval, rval, equal);
-
-    if (lval.isNumber() && rval.isNumber()) {
-        *equal = (lval.toNumber() == rval.toNumber());
-        return true;
-    }
-
-    *equal = false;
-    return true;
-}
-
-static inline bool
-IsNegativeZero(const Value& v)
-{
-    return v.isDouble() && mozilla::IsNegativeZero(v.toDouble());
-}
-
-static inline bool
-IsNaN(const Value& v)
-{
-    return v.isDouble() && mozilla::IsNaN(v.toDouble());
-}
-
-bool
-js::SameValue(JSContext* cx, HandleValue v1, HandleValue v2, bool* same)
-{
-    if (IsNegativeZero(v1)) {
-        *same = IsNegativeZero(v2);
-        return true;
-    }
-    if (IsNegativeZero(v2)) {
-        *same = false;
-        return true;
-    }
-    if (IsNaN(v1) && IsNaN(v2)) {
-        *same = true;
-        return true;
-    }
-    return StrictlyEqual(cx, v1, v2, same);
-}
-
 JSType
 js::TypeOfObject(JSObject* obj)
 {
@@ -974,6 +826,8 @@ js::TypeOfValue(const Value& v)
         return TypeOfObject(&v.toObject());
     if (v.isBoolean())
         return JSTYPE_BOOLEAN;
+    if (v.isBigInt())
+        return JSTYPE_BIGINT;
     MOZ_ASSERT(v.isSymbol());
     return JSTYPE_SYMBOL;
 }
@@ -1487,50 +1341,63 @@ AddOperation(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, Muta
                 return false;
         }
         res.setString(str);
-    } else {
-        double l, r;
-        if (!ToNumber(cx, lhs, &l) || !ToNumber(cx, rhs, &r))
-            return false;
-        res.setNumber(l + r);
+        return true;
     }
 
-    return true;
-}
-
-static MOZ_ALWAYS_INLINE bool
-SubOperation(JSContext* cx, HandleValue lhs, HandleValue rhs, MutableHandleValue res)
-{
-    double d1, d2;
-    if (!ToNumber(cx, lhs, &d1) || !ToNumber(cx, rhs, &d2))
+    if (!ToNumeric(cx, lhs) || !ToNumeric(cx, rhs))
         return false;
-    res.setNumber(d1 - d2);
+
+    if (lhs.isBigInt() || rhs.isBigInt())
+        return BigInt::add(cx, lhs, rhs, res);
+
+    res.setNumber(lhs.toNumber() + rhs.toNumber());
     return true;
 }
 
 static MOZ_ALWAYS_INLINE bool
-MulOperation(JSContext* cx, HandleValue lhs, HandleValue rhs, MutableHandleValue res)
+SubOperation(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res)
 {
-    double d1, d2;
-    if (!ToNumber(cx, lhs, &d1) || !ToNumber(cx, rhs, &d2))
+    if (!ToNumeric(cx, lhs) || !ToNumeric(cx, rhs))
         return false;
-    res.setNumber(d1 * d2);
+
+    if (lhs.isBigInt() || rhs.isBigInt())
+        return BigInt::sub(cx, lhs, rhs, res);
+
+    res.setNumber(lhs.toNumber() - rhs.toNumber());
     return true;
 }
 
 static MOZ_ALWAYS_INLINE bool
-DivOperation(JSContext* cx, HandleValue lhs, HandleValue rhs, MutableHandleValue res)
+MulOperation(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res)
 {
-    double d1, d2;
-    if (!ToNumber(cx, lhs, &d1) || !ToNumber(cx, rhs, &d2))
+    if (!ToNumeric(cx, lhs) || !ToNumeric(cx, rhs))
         return false;
-    res.setNumber(NumberDiv(d1, d2));
+
+    if (lhs.isBigInt() || rhs.isBigInt())
+        return BigInt::mul(cx, lhs, rhs, res);
+
+    res.setNumber(lhs.toNumber() * rhs.toNumber());
     return true;
 }
 
 static MOZ_ALWAYS_INLINE bool
-ModOperation(JSContext* cx, HandleValue lhs, HandleValue rhs, MutableHandleValue res)
+DivOperation(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res)
+{
+    if (!ToNumeric(cx, lhs) || !ToNumeric(cx, rhs))
+        return false;
+
+    if (lhs.isBigInt() || rhs.isBigInt())
+        return BigInt::div(cx, lhs, rhs, res);
+
+    res.setNumber(NumberDiv(lhs.toNumber(), rhs.toNumber()));
+    return true;
+}
+
+static MOZ_ALWAYS_INLINE bool
+ModOperation(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res)
 {
     int32_t l, r;
+
     if (lhs.isInt32() && rhs.isInt32() &&
         (l = lhs.toInt32()) >= 0 && (r = rhs.toInt32()) > 0) {
         int32_t mod = l % r;
@@ -1538,11 +1405,26 @@ ModOperation(JSContext* cx, HandleValue lhs, HandleValue rhs, MutableHandleValue
         return true;
     }
 
-    double d1, d2;
-    if (!ToNumber(cx, lhs, &d1) || !ToNumber(cx, rhs, &d2))
+    if (!ToNumeric(cx, lhs) || !ToNumeric(cx, rhs))
         return false;
 
-    res.setNumber(NumberMod(d1, d2));
+    if (lhs.isBigInt() || rhs.isBigInt())
+        return BigInt::mod(cx, lhs, rhs, res);
+
+    res.setNumber(NumberMod(lhs.toNumber(), rhs.toNumber()));
+    return true;
+}
+
+static MOZ_ALWAYS_INLINE bool
+PowOperation(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res)
+{
+    if (!ToNumeric(cx, lhs) || !ToNumeric(cx, rhs))
+        return false;
+
+    if (lhs.isBigInt() || rhs.isBigInt())
+        return BigInt::pow(cx, lhs, rhs, res);
+
+    res.setNumber(ecmaPow(lhs.toNumber(), rhs.toNumber()));
     return true;
 }
 
@@ -1883,7 +1765,7 @@ CASE(EnableInterruptsPseudoOpcode)
                     goto error;
                 goto successful_return_continuation;
               case JSTRAP_THROW:
-                cx->setPendingException(rval);
+                cx->setPendingExceptionAndCaptureStack(rval);
                 goto error;
               default:;
             }
@@ -1905,7 +1787,7 @@ CASE(EnableInterruptsPseudoOpcode)
                     goto error;
                 goto successful_return_continuation;
               case JSTRAP_THROW:
-                cx->setPendingException(rval);
+                cx->setPendingExceptionAndCaptureStack(rval);
                 goto error;
               default:
                 break;
@@ -2309,31 +2191,41 @@ CASE(JSOP_BINDVAR)
 }
 END_CASE(JSOP_BINDVAR)
 
-#define BITWISE_OP(OP)                                                        \
-    JS_BEGIN_MACRO                                                            \
-        int32_t i, j;                                                         \
-        if (!ToInt32(cx, REGS.stackHandleAt(-2), &i))                         \
-            goto error;                                                       \
-        if (!ToInt32(cx, REGS.stackHandleAt(-1), &j))                         \
-            goto error;                                                       \
-        i = i OP j;                                                           \
-        REGS.sp--;                                                            \
-        REGS.sp[-1].setInt32(i);                                              \
-    JS_END_MACRO
-
 CASE(JSOP_BITOR)
-    BITWISE_OP(|);
+{
+    MutableHandleValue lhs = REGS.stackHandleAt(-2);
+    MutableHandleValue rhs = REGS.stackHandleAt(-1);
+    MutableHandleValue res = REGS.stackHandleAt(-2);
+    if (!BitOr(cx, lhs, rhs, res)) {
+        goto error;
+    }
+    REGS.sp--;
+}
 END_CASE(JSOP_BITOR)
 
 CASE(JSOP_BITXOR)
-    BITWISE_OP(^);
+{
+    MutableHandleValue lhs = REGS.stackHandleAt(-2);
+    MutableHandleValue rhs = REGS.stackHandleAt(-1);
+    MutableHandleValue res = REGS.stackHandleAt(-2);
+    if (!BitXor(cx, lhs, rhs, res)) {
+        goto error;
+    }
+    REGS.sp--;
+}
 END_CASE(JSOP_BITXOR)
 
 CASE(JSOP_BITAND)
-    BITWISE_OP(&);
+{
+    MutableHandleValue lhs = REGS.stackHandleAt(-2);
+    MutableHandleValue rhs = REGS.stackHandleAt(-1);
+    MutableHandleValue res = REGS.stackHandleAt(-2);
+    if (!BitAnd(cx, lhs, rhs, res)) {
+        goto error;
+    }
+    REGS.sp--;
+}
 END_CASE(JSOP_BITAND)
-
-#undef BITWISE_OP
 
 CASE(JSOP_EQ)
     if (!LooseEqualityOp<true>(cx, REGS))
@@ -2390,8 +2282,9 @@ CASE(JSOP_LT)
     bool cond;
     MutableHandleValue lval = REGS.stackHandleAt(-2);
     MutableHandleValue rval = REGS.stackHandleAt(-1);
-    if (!LessThanOperation(cx, lval, rval, &cond))
+    if (!LessThanOperation(cx, lval, rval, &cond)) {
         goto error;
+    }
     TRY_BRANCH_AFTER_COND(cond, 2);
     REGS.sp[-2].setBoolean(cond);
     REGS.sp--;
@@ -2403,8 +2296,9 @@ CASE(JSOP_LE)
     bool cond;
     MutableHandleValue lval = REGS.stackHandleAt(-2);
     MutableHandleValue rval = REGS.stackHandleAt(-1);
-    if (!LessThanOrEqualOperation(cx, lval, rval, &cond))
+    if (!LessThanOrEqualOperation(cx, lval, rval, &cond)) {
         goto error;
+    }
     TRY_BRANCH_AFTER_COND(cond, 2);
     REGS.sp[-2].setBoolean(cond);
     REGS.sp--;
@@ -2416,8 +2310,9 @@ CASE(JSOP_GT)
     bool cond;
     MutableHandleValue lval = REGS.stackHandleAt(-2);
     MutableHandleValue rval = REGS.stackHandleAt(-1);
-    if (!GreaterThanOperation(cx, lval, rval, &cond))
+    if (!GreaterThanOperation(cx, lval, rval, &cond)) {
         goto error;
+    }
     TRY_BRANCH_AFTER_COND(cond, 2);
     REGS.sp[-2].setBoolean(cond);
     REGS.sp--;
@@ -2429,43 +2324,47 @@ CASE(JSOP_GE)
     bool cond;
     MutableHandleValue lval = REGS.stackHandleAt(-2);
     MutableHandleValue rval = REGS.stackHandleAt(-1);
-    if (!GreaterThanOrEqualOperation(cx, lval, rval, &cond))
+    if (!GreaterThanOrEqualOperation(cx, lval, rval, &cond)) {
         goto error;
+    }
     TRY_BRANCH_AFTER_COND(cond, 2);
     REGS.sp[-2].setBoolean(cond);
     REGS.sp--;
 }
 END_CASE(JSOP_GE)
 
-#define SIGNED_SHIFT_OP(OP)                                                   \
-    JS_BEGIN_MACRO                                                            \
-        int32_t i, j;                                                         \
-        if (!ToInt32(cx, REGS.stackHandleAt(-2), &i))                         \
-            goto error;                                                       \
-        if (!ToInt32(cx, REGS.stackHandleAt(-1), &j))                         \
-            goto error;                                                       \
-        i = i OP (j & 31);                                                    \
-        REGS.sp--;                                                            \
-        REGS.sp[-1].setInt32(i);                                              \
-    JS_END_MACRO
-
 CASE(JSOP_LSH)
-    SIGNED_SHIFT_OP(<<);
+{
+    MutableHandleValue lhs = REGS.stackHandleAt(-2);
+    MutableHandleValue rhs = REGS.stackHandleAt(-1);
+    MutableHandleValue res = REGS.stackHandleAt(-2);
+    if (!BitLsh(cx, lhs, rhs, res)) {
+        goto error;
+    }
+    REGS.sp--;
+}
 END_CASE(JSOP_LSH)
 
 CASE(JSOP_RSH)
-    SIGNED_SHIFT_OP(>>);
+{
+    MutableHandleValue lhs = REGS.stackHandleAt(-2);
+    MutableHandleValue rhs = REGS.stackHandleAt(-1);
+    MutableHandleValue res = REGS.stackHandleAt(-2);
+    if (!BitRsh(cx, lhs, rhs, res)) {
+        goto error;
+    }
+    REGS.sp--;
+}
 END_CASE(JSOP_RSH)
-
-#undef SIGNED_SHIFT_OP
 
 CASE(JSOP_URSH)
 {
-    HandleValue lval = REGS.stackHandleAt(-2);
-    HandleValue rval = REGS.stackHandleAt(-1);
+    MutableHandleValue lhs = REGS.stackHandleAt(-2);
+    MutableHandleValue rhs = REGS.stackHandleAt(-1);
     MutableHandleValue res = REGS.stackHandleAt(-2);
-    if (!UrshOperation(cx, lval, rval, res))
+    if (!UrshOperation(cx, lhs, rhs, res)) {
         goto error;
+    }
     REGS.sp--;
 }
 END_CASE(JSOP_URSH)
@@ -2475,8 +2374,9 @@ CASE(JSOP_ADD)
     MutableHandleValue lval = REGS.stackHandleAt(-2);
     MutableHandleValue rval = REGS.stackHandleAt(-1);
     MutableHandleValue res = REGS.stackHandleAt(-2);
-    if (!AddOperation(cx, lval, rval, res))
+    if (!AddOperation(cx, lval, rval, res)) {
         goto error;
+    }
     REGS.sp--;
 }
 END_CASE(JSOP_ADD)
@@ -2486,8 +2386,9 @@ CASE(JSOP_SUB)
     ReservedRooted<Value> lval(&rootValue0, REGS.sp[-2]);
     ReservedRooted<Value> rval(&rootValue1, REGS.sp[-1]);
     MutableHandleValue res = REGS.stackHandleAt(-2);
-    if (!SubOperation(cx, lval, rval, res))
+    if (!SubOperation(cx, &lval, &rval, res)) {
         goto error;
+    }
     REGS.sp--;
 }
 END_CASE(JSOP_SUB)
@@ -2497,8 +2398,9 @@ CASE(JSOP_MUL)
     ReservedRooted<Value> lval(&rootValue0, REGS.sp[-2]);
     ReservedRooted<Value> rval(&rootValue1, REGS.sp[-1]);
     MutableHandleValue res = REGS.stackHandleAt(-2);
-    if (!MulOperation(cx, lval, rval, res))
+    if (!MulOperation(cx, &lval, &rval, res)) {
         goto error;
+    }
     REGS.sp--;
 }
 END_CASE(JSOP_MUL)
@@ -2508,8 +2410,9 @@ CASE(JSOP_DIV)
     ReservedRooted<Value> lval(&rootValue0, REGS.sp[-2]);
     ReservedRooted<Value> rval(&rootValue1, REGS.sp[-1]);
     MutableHandleValue res = REGS.stackHandleAt(-2);
-    if (!DivOperation(cx, lval, rval, res))
+    if (!DivOperation(cx, &lval, &rval, res)) {
         goto error;
+    }
     REGS.sp--;
 }
 END_CASE(JSOP_DIV)
@@ -2519,8 +2422,9 @@ CASE(JSOP_MOD)
     ReservedRooted<Value> lval(&rootValue0, REGS.sp[-2]);
     ReservedRooted<Value> rval(&rootValue1, REGS.sp[-1]);
     MutableHandleValue res = REGS.stackHandleAt(-2);
-    if (!ModOperation(cx, lval, rval, res))
+    if (!ModOperation(cx, &lval, &rval, res)) {
         goto error;
+    }
     REGS.sp--;
 }
 END_CASE(JSOP_MOD)
@@ -2530,8 +2434,9 @@ CASE(JSOP_POW)
     ReservedRooted<Value> lval(&rootValue0, REGS.sp[-2]);
     ReservedRooted<Value> rval(&rootValue1, REGS.sp[-1]);
     MutableHandleValue res = REGS.stackHandleAt(-2);
-    if (!math_pow_handle(cx, lval, rval, res))
+    if (!PowOperation(cx, &lval, &rval, res)) {
         goto error;
+    }
     REGS.sp--;
 }
 END_CASE(JSOP_POW)
@@ -2546,11 +2451,11 @@ END_CASE(JSOP_NOT)
 
 CASE(JSOP_BITNOT)
 {
-    int32_t i;
-    HandleValue value = REGS.stackHandleAt(-1);
-    if (!BitNot(cx, value, &i))
+    MutableHandleValue value = REGS.stackHandleAt(-1);
+    MutableHandleValue res = REGS.stackHandleAt(-1);
+    if (!BitNot(cx, value, res)) {
         goto error;
-    REGS.sp[-1].setInt32(i);
+    }
 }
 END_CASE(JSOP_BITNOT)
 
@@ -2558,7 +2463,7 @@ CASE(JSOP_NEG)
 {
     ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
     MutableHandleValue res = REGS.stackHandleAt(-1);
-    if (!NegOperation(cx, script, REGS.pc, val, res))
+    if (!NegOperation(cx, script, REGS.pc, &val, res))
         goto error;
 }
 END_CASE(JSOP_NEG)
@@ -2853,9 +2758,9 @@ END_CASE(JSOP_GETELEM)
 
 CASE(JSOP_GETELEM_SUPER)
 {
-    HandleValue rval = REGS.stackHandleAt(-3);
     ReservedRooted<JSObject*> receiver(&rootObject0);
-    FETCH_OBJECT(cx, -2, receiver);
+    FETCH_OBJECT(cx, -3, receiver);
+    HandleValue rval = REGS.stackHandleAt(-2);
     ReservedRooted<JSObject*> obj(&rootObject1, &REGS.sp[-1].toObject());
 
     MutableHandleValue res = REGS.stackHandleAt(-3);
@@ -2897,9 +2802,9 @@ CASE(JSOP_STRICTSETELEM_SUPER)
     static_assert(JSOP_SETELEM_SUPER_LENGTH == JSOP_STRICTSETELEM_SUPER_LENGTH,
                   "setelem-super and strictsetelem-super must be the same size");
 
+    ReservedRooted<Value> receiver(&rootValue0, REGS.sp[-4]);
     ReservedRooted<jsid> id(&rootId0);
-    FETCH_ELEMENT_ID(-4, id);
-    ReservedRooted<Value> receiver(&rootValue0, REGS.sp[-3]);
+    FETCH_ELEMENT_ID(-3, id);
     ReservedRooted<JSObject*> obj(&rootObject1, &REGS.sp[-2].toObject());
     HandleValue value = REGS.stackHandleAt(-1);
 
@@ -3743,12 +3648,9 @@ CASE(JSOP_INITHIDDENPROP)
     /* Load the object being initialized into lval/obj. */
     ReservedRooted<JSObject*> obj(&rootObject0, &REGS.sp[-2].toObject());
 
-    PropertyName* name = script->getName(REGS.pc);
+    ReservedRooted<PropertyName*> name(&rootName0, script->getName(REGS.pc));
 
-    RootedId& id = rootId0;
-    id = NameToId(name);
-
-    if (!InitPropertyOperation(cx, JSOp(*REGS.pc), obj, id, rval))
+    if (!InitPropertyOperation(cx, JSOp(*REGS.pc), obj, name, rval))
         goto error;
 
     REGS.sp--;
@@ -3825,7 +3727,8 @@ CASE(JSOP_RETSUB)
          * be necessary, but it seems clearer.  And it points out a FIXME:
          * 350509, due to Igor Bukanov.
          */
-        cx->setPendingException(rval);
+        ReservedRooted<Value> v(&rootValue0, rval);
+        cx->setPendingExceptionAndCaptureStack(v);
         goto error;
     }
     MOZ_ASSERT(rval.isInt32());
@@ -4186,6 +4089,35 @@ CASE(JSOP_NEWTARGET)
     MOZ_ASSERT(REGS.sp[-1].isObject() || REGS.sp[-1].isUndefined());
 END_CASE(JSOP_NEWTARGET)
 
+CASE(JSOP_IMPORTMETA)
+{
+    ReservedRooted<JSObject*> module(&rootObject0, GetModuleObjectForScript(script));
+    MOZ_ASSERT(module);
+
+    JSObject* metaObject = GetOrCreateModuleMetaObject(cx, module);
+    if (!metaObject)
+        goto error;
+
+    PUSH_OBJECT(*metaObject);
+}
+END_CASE(JSOP_IMPORTMETA)
+
+CASE(JSOP_DYNAMIC_IMPORT)
+{
+    ReservedRooted<Value> referencingPrivate(&rootValue0);
+    referencingPrivate = FindScriptOrModulePrivateForScript(script);
+
+    ReservedRooted<Value> specifier(&rootValue1);
+    POP_COPY_TO(specifier);
+
+    JSObject* promise = StartDynamicModuleImport(cx, referencingPrivate, specifier);
+    if (!promise)
+        goto error;
+
+    PUSH_OBJECT(*promise);
+}
+END_CASE(JSOP_DYNAMIC_IMPORT)
+
 CASE(JSOP_SUPERFUN)
 {
     ReservedRooted<JSObject*> superEnvFunc(&rootObject0, &GetSuperEnvFunction(cx, REGS));
@@ -4256,6 +4188,41 @@ END_CASE(JSOP_DEBUGCHECKSELFHOSTED)
 CASE(JSOP_IS_CONSTRUCTING)
     PUSH_MAGIC(JS_IS_CONSTRUCTING);
 END_CASE(JSOP_IS_CONSTRUCTING)
+
+CASE(JSOP_INC)
+{
+    ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
+    MutableHandleValue res = REGS.stackHandleAt(-1);
+    if (!IncOperation(cx, &val, res)) {
+        goto error;
+    }
+}
+END_CASE(JSOP_INC)
+
+CASE(JSOP_DEC)
+{
+    ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
+    MutableHandleValue res = REGS.stackHandleAt(-1);
+    if (!DecOperation(cx, &val, res)) {
+        goto error;
+    }
+}
+END_CASE(JSOP_DEC)
+
+CASE(JSOP_TONUMERIC)
+{
+    if (!ToNumeric(cx, REGS.stackHandleAt(-1))) {
+        goto error;
+    }
+}
+END_CASE(JSOP_TONUMERIC)
+
+CASE(JSOP_BIGINT)
+{
+    PUSH_COPY(script->getConst(GET_UINT32_INDEX(REGS.pc)));
+    MOZ_ASSERT(REGS.sp[-1].isBigInt());
+}
+END_CASE(JSOP_BIGINT)
 
 DEFAULT()
 {
@@ -4331,7 +4298,7 @@ bool
 js::Throw(JSContext* cx, HandleValue v)
 {
     MOZ_ASSERT(!cx->isExceptionPending());
-    cx->setPendingException(v);
+    cx->setPendingExceptionAndCaptureStack(v);
     return false;
 }
 
@@ -4342,7 +4309,7 @@ js::ThrowingOperation(JSContext* cx, HandleValue v)
     // execution instead of calling the (JIT) exception handler.
 
     MOZ_ASSERT(!cx->isExceptionPending());
-    cx->setPendingException(v);
+    cx->setPendingExceptionAndCaptureStack(v);
     return true;
 }
 
@@ -4357,7 +4324,8 @@ js::GetProperty(JSContext* cx, HandleValue v, HandlePropertyName name, MutableHa
 
     // Optimize common cases like (2).toString() or "foo".valueOf() to not
     // create a wrapper object.
-    if (v.isPrimitive() && !v.isNullOrUndefined()) {
+    if (v.isPrimitive() && !v.isNullOrUndefined() && !v.isBigInt())
+    {
         NativeObject* proto;
         if (v.isNumber()) {
             proto = GlobalObject::getOrCreateNumberPrototype(cx, cx->global());
@@ -4437,7 +4405,13 @@ js::Lambda(JSContext* cx, HandleFunction fun, HandleObject parent)
 {
     MOZ_ASSERT(!fun->isArrow());
 
-    RootedObject clone(cx, CloneFunctionObjectIfNotSingleton(cx, fun, parent));
+    JSFunction* clone;
+    if (fun->isNative()) {
+        MOZ_ASSERT(IsAsmJSModule(fun));
+        clone = CloneAsmJSModuleFunction(cx, fun);
+    } else {
+        clone = CloneFunctionObjectIfNotSingleton(cx, fun, parent);
+    }
     if (!clone)
         return nullptr;
 
@@ -4548,14 +4522,23 @@ js::ThrowMsgOperation(JSContext* cx, const unsigned errorNum)
 }
 
 bool
-js::GetAndClearException(JSContext* cx, MutableHandleValue res)
+js::GetAndClearExceptionAndStack(JSContext* cx, MutableHandleValue res,
+                                 MutableHandleSavedFrame stack)
 {
     if (!cx->getPendingException(res))
         return false;
+    stack.set(cx->getPendingExceptionStack());
     cx->clearPendingException();
 
     // Allow interrupting deeply nested exception handling.
     return CheckForInterrupt(cx);
+}
+
+bool
+js::GetAndClearException(JSContext* cx, MutableHandleValue res)
+{
+    RootedSavedFrame stack(cx);
+    return GetAndClearExceptionAndStack(cx, res, &stack);
 }
 
 template <bool strict>
@@ -4694,6 +4677,12 @@ bool
 js::ModValues(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res)
 {
     return ModOperation(cx, lhs, rhs, res);
+}
+
+bool
+js::PowValues(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res)
+{
+    return PowOperation(cx, lhs, rhs, res);
 }
 
 bool
@@ -4870,7 +4859,7 @@ js::SpreadCallOperation(JSContext* cx, HandleScript script, jsbytecode* pc, Hand
                                    constructing ? CONSTRUCT : NO_CONSTRUCT);
     }
 
-    if (MOZ_UNLIKELY(!callee.toObject().is<JSFunction>()) && !callee.toObject().callHook()) {
+    if (!callee.toObject().isCallable()) {
         return ReportIsNotFunction(cx, callee, 2 + constructing,
                                    constructing ? CONSTRUCT : NO_CONSTRUCT);
     }

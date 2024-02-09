@@ -580,8 +580,10 @@ struct UnusedGCThingSizes
     macro(Other, GCHeapUnused, objectGroup) \
     macro(Other, GCHeapUnused, string) \
     macro(Other, GCHeapUnused, symbol) \
+    macro(Other, GCHeapUnused, bigInt) \
     macro(Other, GCHeapUnused, jitcode) \
-    macro(Other, GCHeapUnused, scope)
+    macro(Other, GCHeapUnused, scope) \
+    macro(Other, GCHeapUnused, regExpShared)
 
     UnusedGCThingSizes()
       : FOR_EACH_SIZE(ZERO_SIZE)
@@ -595,16 +597,18 @@ struct UnusedGCThingSizes
 
     void addToKind(JS::TraceKind kind, intptr_t n) {
         switch (kind) {
-          case JS::TraceKind::Object:       object += n;      break;
-          case JS::TraceKind::String:       string += n;      break;
-          case JS::TraceKind::Symbol:       symbol += n;      break;
-          case JS::TraceKind::Script:       script += n;      break;
-          case JS::TraceKind::Shape:        shape += n;       break;
-          case JS::TraceKind::BaseShape:    baseShape += n;   break;
-          case JS::TraceKind::JitCode:      jitcode += n;     break;
-          case JS::TraceKind::LazyScript:   lazyScript += n;  break;
-          case JS::TraceKind::ObjectGroup:  objectGroup += n; break;
-          case JS::TraceKind::Scope:        scope += n;       break;
+          case JS::TraceKind::Object:       object += n;       break;
+          case JS::TraceKind::String:       string += n;       break;
+          case JS::TraceKind::Symbol:       symbol += n;       break;
+          case JS::TraceKind::BigInt:       bigInt += n;       break;
+          case JS::TraceKind::Script:       script += n;       break;
+          case JS::TraceKind::Shape:        shape += n;        break;
+          case JS::TraceKind::BaseShape:    baseShape += n;    break;
+          case JS::TraceKind::JitCode:      jitcode += n;      break;
+          case JS::TraceKind::LazyScript:   lazyScript += n;   break;
+          case JS::TraceKind::ObjectGroup:  objectGroup += n;  break;
+          case JS::TraceKind::Scope:        scope += n;        break;
+          case JS::TraceKind::RegExpShared: regExpShared += n; break;
           default:
             MOZ_CRASH("Bad trace kind for UnusedGCThingSizes");
         }
@@ -638,6 +642,8 @@ struct ZoneStats
 {
 #define FOR_EACH_SIZE(macro) \
     macro(Other,   GCHeapUsed,  symbolsGCHeap) \
+    macro(Other,   GCHeapUsed,  bigIntsGCHeap) \
+    macro(Other,   MallocHeap,  bigIntsMallocHeap) \
     macro(Other,   GCHeapAdmin, gcHeapArenaAdmin) \
     macro(Other,   GCHeapUsed,  lazyScriptsGCHeap) \
     macro(Other,   MallocHeap,  lazyScriptsMallocHeap) \
@@ -646,6 +652,8 @@ struct ZoneStats
     macro(Other,   MallocHeap,  objectGroupsMallocHeap) \
     macro(Other,   GCHeapUsed,  scopesGCHeap) \
     macro(Other,   MallocHeap,  scopesMallocHeap) \
+    macro(Other,   GCHeapUsed,  regExpSharedsGCHeap) \
+    macro(Other,   MallocHeap,  regExpSharedsMallocHeap) \
     macro(Other,   MallocHeap,  typePool) \
     macro(Other,   MallocHeap,  baselineStubsOptimized) \
     macro(Other,   MallocHeap,  uniqueIdMap) \

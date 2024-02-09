@@ -943,6 +943,12 @@ public:
   }
 
   /**
+   * This is similar to above, but in case 'this' is ShadowRoot, we return its
+   * host element.
+   */
+  nsINode* GetParentOrHostNode();
+
+  /**
    * Returns the node that is the parent of this node in the flattened
    * tree. This differs from the normal parent if the node is filtered
    * into an insertion point, or if the node is a direct child of a
@@ -1867,7 +1873,7 @@ public:
     aNodeName.SetStringBuffer(nsStringBuffer::FromString(nodeName),
                               nodeName.Length());
   }
-  MOZ_MUST_USE nsresult GetBaseURI(nsAString& aBaseURI) const;
+  [[nodiscard]] nsresult GetBaseURI(nsAString& aBaseURI) const;
   // Return the base URI for the document.
   // The returned value may differ if the document is loaded via XHR, and
   // when accessed from chrome privileged script and
@@ -1974,6 +1980,7 @@ public:
 
   void Prepend(const Sequence<OwningNodeOrString>& aNodes, ErrorResult& aRv);
   void Append(const Sequence<OwningNodeOrString>& aNodes, ErrorResult& aRv);
+  void ReplaceChildren(const Sequence<OwningNodeOrString>& aNodes, ErrorResult& aRv);
 
   void GetBoxQuads(const BoxQuadOptions& aOptions,
                    nsTArray<RefPtr<DOMQuad> >& aResult,

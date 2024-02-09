@@ -3016,6 +3016,8 @@ nsLocalFile::IsExecutable(bool* aResult)
       "air",         // Adobe AIR installer
       "app",         // executable application
       "application", // from bug 348763
+      "appx",
+      "appxbundle",
       "asp",
       "bas",
       "bat",
@@ -3024,6 +3026,8 @@ nsLocalFile::IsExecutable(bool* aResult)
       "com",
       "cpl",
       "crt",
+      "der",
+      "diagcab",
       "exe",
       "fxp",         // FoxPro compiled app
       "hlp",
@@ -3056,6 +3060,8 @@ nsLocalFile::IsExecutable(bool* aResult)
       "msh",         // Microsoft Shell
       "mshxml",      // Microsoft Shell
       "msi",
+      "msix",
+      "msixbundle",
       "msp",
       "mst",
       "ops",         // Office Profile Settings
@@ -3084,7 +3090,8 @@ nsLocalFile::IsExecutable(bool* aResult)
       "ws",
       "wsc",
       "wsf",
-      "wsh"
+      "wsh",
+      "xll"          // MS Excel dynamic link library
     };
     nsDependentSubstring ext = Substring(path, dotIdx + 1);
     for (size_t i = 0; i < ArrayLength(executableExts); ++i) {

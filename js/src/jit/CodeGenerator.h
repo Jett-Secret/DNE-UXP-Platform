@@ -56,7 +56,7 @@ class OutOfLineNaNToZero;
 class CodeGenerator final : public CodeGeneratorSpecific
 {
     void generateArgumentsChecks(bool bailout = true);
-    MOZ_MUST_USE bool generateBody();
+    [[nodiscard]] bool generateBody();
 
     ConstantOrRegister toConstantOrRegister(LInstruction* lir, size_t n, MIRType type);
 
@@ -65,11 +65,11 @@ class CodeGenerator final : public CodeGeneratorSpecific
     ~CodeGenerator();
 
   public:
-    MOZ_MUST_USE bool generate();
-    MOZ_MUST_USE bool generateWasm(wasm::SigIdDesc sigId, wasm::TrapOffset trapOffset,
+    [[nodiscard]] bool generate();
+    [[nodiscard]] bool generateWasm(wasm::SigIdDesc sigId, wasm::TrapOffset trapOffset,
                                    wasm::FuncOffsets *offsets);
-    MOZ_MUST_USE bool link(JSContext* cx, CompilerConstraintList* constraints);
-    MOZ_MUST_USE bool linkSharedStubs(JSContext* cx);
+    [[nodiscard]] bool link(JSContext* cx, CompilerConstraintList* constraints);
+    [[nodiscard]] bool linkSharedStubs(JSContext* cx);
 
     void visitOsiPoint(LOsiPoint* lir);
     void visitGoto(LGoto* lir);
@@ -149,6 +149,7 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitGuardReceiverPolymorphic(LGuardReceiverPolymorphic* lir);
     void visitGuardUnboxedExpando(LGuardUnboxedExpando* lir);
     void visitLoadUnboxedExpando(LLoadUnboxedExpando* lir);
+    void visitToNumeric(LToNumeric* lir);
     void visitTypeBarrierV(LTypeBarrierV* lir);
     void visitTypeBarrierO(LTypeBarrierO* lir);
     void visitMonitorTypes(LMonitorTypes* lir);
@@ -202,8 +203,6 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitNewObject(LNewObject* lir);
     void visitOutOfLineNewObject(OutOfLineNewObject* ool);
     void visitNewTypedObject(LNewTypedObject* lir);
-    void visitSimdBox(LSimdBox* lir);
-    void visitSimdUnbox(LSimdUnbox* lir);
     void visitNewNamedLambdaObject(LNewNamedLambdaObject* lir);
     void visitNewCallObject(LNewCallObject* lir);
     void visitNewSingletonCallObject(LNewSingletonCallObject* lir);
@@ -431,7 +430,7 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitAssertResultV(LAssertResultV* ins);
     void visitAssertResultT(LAssertResultT* ins);
     void emitAssertResultV(const ValueOperand output, const TemporaryTypeSet* typeset);
-    void emitAssertObjectOrStringResult(Register input, MIRType type, const TemporaryTypeSet* typeset);
+    void emitAssertGCThingResult(Register input, MIRType type, const TemporaryTypeSet* typeset);
 
     void visitInterruptCheck(LInterruptCheck* lir);
     void visitOutOfLineInterruptCheckImplicit(OutOfLineInterruptCheckImplicit* ins);
@@ -441,7 +440,9 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitRotate(LRotate* ins);
 
     void visitRandom(LRandom* ins);
-    void visitSignExtend(LSignExtend* ins);
+    void visitSignExtendInt32(LSignExtendInt32* ins);
+    void visitModuleMetadata(LModuleMetadata* lir);
+    void visitDynamicImport(LDynamicImport* lir);
 
 #ifdef DEBUG
     void emitDebugForceBailing(LInstruction* lir);
@@ -465,7 +466,7 @@ class CodeGenerator final : public CodeGeneratorSpecific
                              bool strict, bool needsTypeBarrier, bool guardHoles,
                              jsbytecode* profilerLeavePc);
 
-    MOZ_MUST_USE bool generateBranchV(const ValueOperand& value, Label* ifTrue, Label* ifFalse,
+    [[nodiscard]] bool generateBranchV(const ValueOperand& value, Label* ifTrue, Label* ifFalse,
                                       FloatRegister fr);
 
     void emitLambdaInit(Register resultReg, Register envChainReg,
@@ -569,7 +570,7 @@ class CodeGenerator final : public CodeGeneratorSpecific
 
 #ifdef DEBUG
     void emitDebugResultChecks(LInstruction* ins);
-    void emitObjectOrStringResultChecks(LInstruction* lir, MDefinition* mir);
+    void emitGCThingResultChecks(LInstruction* lir, MDefinition* mir);
     void emitValueResultChecks(LInstruction* lir, MDefinition* mir);
 #endif
 
@@ -579,22 +580,6 @@ class CodeGenerator final : public CodeGeneratorSpecific
 #if defined(JS_ION_PERF)
     PerfSpewer perfSpewer_;
 #endif
-
-    // This integer is a bit mask of all SimdTypeDescr::Type indexes.  When a
-    // MSimdBox instruction is encoded, it might have either been created by
-    // IonBuilder, or by the Eager Simd Unbox phase.
-    //
-    // As the template objects are weak references, the JitCompartment is using
-    // Read Barriers, but such barrier cannot be used during the compilation. To
-    // work around this issue, the barriers are captured during
-    // CodeGenerator::link.
-    //
-    // Instead of saving the pointers, we just save the index of the Read
-    // Barriered objects in a bit mask.
-    uint32_t simdRefreshTemplatesDuringLink_;
-
-    void registerSimdTemplate(SimdType simdType);
-    void captureSimdTemplate(JSContext* cx);
 };
 
 } // namespace jit

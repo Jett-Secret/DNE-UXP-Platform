@@ -128,11 +128,11 @@ public:
   }
 
   RefPtr<ContentBridgeParent> mLastBridge;
-
+#ifdef MOZ_ENABLE_NPAPI
   PPluginModuleParent *
   AllocPPluginModuleParent(mozilla::ipc::Transport* transport,
                            base::ProcessId otherProcess) override;
-
+#endif
   PContentBridgeParent*
   AllocPContentBridgeParent(mozilla::ipc::Transport* transport,
                             base::ProcessId otherProcess) override;
@@ -140,12 +140,14 @@ public:
   AllocPContentBridgeChild(mozilla::ipc::Transport* transport,
                            base::ProcessId otherProcess) override;
 
+#ifdef MOZ_GMP
   PGMPServiceChild*
   AllocPGMPServiceChild(mozilla::ipc::Transport* transport,
                         base::ProcessId otherProcess) override;
 
   bool
   RecvGMPsChanged(nsTArray<GMPCapabilityData>&& capabilities) override;
+#endif
 
   bool
   RecvInitRendering(
@@ -425,13 +427,13 @@ public:
   virtual bool RecvNotifyIdleObserver(const uint64_t& aObserver,
                                       const nsCString& aTopic,
                                       const nsString& aData) override;
-
+#ifdef MOZ_ENABLE_NPAPI
   virtual bool RecvAssociatePluginId(const uint32_t& aPluginId,
                                      const base::ProcessId& aProcessId) override;
 
   virtual bool RecvLoadPluginResult(const uint32_t& aPluginId,
                                     const bool& aResult) override;
-
+#endif
   virtual bool RecvUpdateWindow(const uintptr_t& aChildId) override;
 
   virtual bool RecvDomainSetChanged(const uint32_t& aSetType,

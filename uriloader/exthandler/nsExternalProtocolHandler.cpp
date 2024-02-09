@@ -1,6 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim:set ts=2 sts=2 sw=2 et cin:
- *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -393,12 +391,6 @@ NS_IMETHODIMP nsExtProtocolChannel::SetParentListener(HttpChannelParentListener*
   // just no-op.  Actual operation will happen from the child process
   // via CompleteRedirectSetup call on the child channel.
   mConnectedParent = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsExtProtocolChannel::NotifyTrackingProtectionDisabled()
-{
-  // nothing to do
   return NS_OK;
 }
 

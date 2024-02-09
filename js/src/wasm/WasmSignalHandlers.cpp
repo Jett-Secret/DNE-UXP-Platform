@@ -1,6 +1,7 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
  *
  * Copyright 2014 Mozilla Foundation
+ * Copyright 2023 Moonchild Productions
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,6 +70,9 @@ class AutoSetHandlingSegFault
         rt->handlingSegFault = false;
     }
 };
+
+// Follow TenFourFox and just disable ASM JS
+#if !(defined(XP_DARWIN) && defined(__ppc__))
 
 #if defined(XP_WIN)
 # define XMM_sig(p,i) ((p)->Xmm##i)
@@ -1234,6 +1238,7 @@ JitInterruptHandler(int signum, siginfo_t* info, void* context)
     }
 }
 #endif
+#endif // XP_DARWIN && __ppc__
 
 static bool sTriedInstallSignalHandlers = false;
 static bool sHaveSignalHandlers = false;
@@ -1255,6 +1260,8 @@ ProcessHasSignalHandlers()
     // thread (see InterruptRunningJitCode).
 #if defined(XP_WIN)
     // Windows uses SuspendThread to stop the main thread from another thread.
+#elif defined(XP_DARWIN) && defined(__ppc__)
+    // For now just skip the signal handler for Mac PowerPC
 #else
     struct sigaction interruptHandler;
     interruptHandler.sa_flags = SA_SIGINFO;
@@ -1317,7 +1324,7 @@ wasm::EnsureSignalHandlers(JSRuntime* rt)
     if (!ProcessHasSignalHandlers())
         return true;
 
-#if defined(XP_DARWIN)
+#if defined(XP_DARWIN) && !defined(__ppc__)
     // On OSX, each JSRuntime gets its own handler thread.
     if (!rt->wasmMachExceptionHandler.installed() && !rt->wasmMachExceptionHandler.install(rt))
         return false;
@@ -1345,6 +1352,8 @@ wasm::HaveSignalHandlers()
 void
 js::InterruptRunningJitCode(JSRuntime* rt)
 {
+// Like TenFourFox, skip this on Mac PowerPC
+#if !(defined(XP_DARWIN) && defined(__ppc__))
     // If signal handlers weren't installed, then Ion and wasm emit normal
     // interrupt checks and don't need asynchronous interruption.
     if (!HaveSignalHandlers())
@@ -1389,6 +1398,7 @@ js::InterruptRunningJitCode(JSRuntime* rt)
     pthread_t thread = (pthread_t)rt->ownerThreadNative();
     pthread_kill(thread, sInterruptSignal);
 #endif
+#endif // XP_DARWIN && __ppc__
 }
 
 MOZ_COLD bool

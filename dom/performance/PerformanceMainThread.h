@@ -57,8 +57,17 @@ public:
                                 const Optional<nsAString>& aEntryType,
                                 nsTArray<RefPtr<PerformanceEntry>>& aRetval) override;
 
+  bool IsGlobalObjectWindow() const override
+  {
+    return true;
+  }
+
+  void QueueNavigationTimingEntry() override;
+
 protected:
   ~PerformanceMainThread();
+
+  void CreateNavigationTimingEntry();
 
   nsISupports* GetAsISupports() override
   {
@@ -67,13 +76,10 @@ protected:
 
   void InsertUserEntry(PerformanceEntry* aEntry) override;
 
-  bool IsPerformanceTimingAttribute(const nsAString& aName) override;
-
   DOMHighResTimeStamp
   GetPerformanceTimingFromString(const nsAString& aTimingName) override;
 
   void DispatchBufferFullEvent() override;
-  void EnsureDocEntry();
 
   RefPtr<PerformanceEntry> mDocEntry;
   RefPtr<nsDOMNavigationTiming> mDOMTiming;

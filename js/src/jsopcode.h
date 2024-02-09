@@ -56,6 +56,7 @@ enum {
     JOF_ATOMOBJECT      = 19,       /* uint16_t constant index + object index */
     JOF_SCOPE           = 20,       /* unsigned 32-bit scope index */
     JOF_ENVCOORD        = 21,       /* embedded ScopeCoordinate immediate */
+    JOF_BIGINT          = 22,       /* uint32_t index for BigInt value */
     JOF_TYPEMASK        = 0x001f,   /* mask for above immediate types */
 
     JOF_NAME            = 1 << 5,   /* name operation */
@@ -874,7 +875,7 @@ GetNextPc(jsbytecode* pc)
 /*
  * Disassemblers, for debugging only.
  */
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 Disassemble(JSContext* cx, JS::Handle<JSScript*> script, bool lines, Sprinter* sp);
 
 unsigned
@@ -883,7 +884,7 @@ Disassemble1(JSContext* cx, JS::Handle<JSScript*> script, jsbytecode* pc, unsign
 
 #endif
 
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 DumpCompartmentPCCounts(JSContext* cx);
 
 } // namespace js

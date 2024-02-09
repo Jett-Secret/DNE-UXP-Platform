@@ -168,7 +168,7 @@ class MOZ_RAII CacheRegisterAllocator
         writer_(writer)
     {}
 
-    MOZ_MUST_USE bool init(const AllocatableGeneralRegisterSet& available) {
+    [[nodiscard]] bool init(const AllocatableGeneralRegisterSet& available) {
         availableRegs_ = available;
         if (!origInputLocations_.resize(writer_.numInputOperands()))
             return false;
@@ -394,12 +394,12 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler
         stubDataOffset_(stubDataOffset)
     {}
 
-    MOZ_MUST_USE bool init(CacheKind kind);
+    [[nodiscard]] bool init(CacheKind kind);
 
     JitCode* compile();
 
   private:
-#define DEFINE_OP(op) MOZ_MUST_USE bool emit##op();
+#define DEFINE_OP(op) [[nodiscard]] bool emit##op();
     CACHE_IR_OPS(DEFINE_OP)
 #undef DEFINE_OP
 
@@ -709,6 +709,9 @@ BaselineCacheIRCompiler::emitGuardType()
         break;
       case JSVAL_TYPE_SYMBOL:
         masm.branchTestSymbol(Assembler::NotEqual, input, failure->label());
+        break;
+      case JSVAL_TYPE_BIGINT:
+        masm.branchTestBigInt(Assembler::NotEqual, input, failure->label());
         break;
       case JSVAL_TYPE_DOUBLE:
         masm.branchTestNumber(Assembler::NotEqual, input, failure->label());

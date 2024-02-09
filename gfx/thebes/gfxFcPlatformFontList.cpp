@@ -38,6 +38,7 @@
 #endif
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 using namespace mozilla::unicode;
 
 #ifndef FC_POSTSCRIPT_NAME
@@ -54,6 +55,20 @@ using namespace mozilla::unicode;
 #define LOG_CMAPDATA_ENABLED() MOZ_LOG_TEST( \
                                    gfxPlatform::GetLog(eGfxLog_cmapdata), \
                                    LogLevel::Debug)
+
+template <>
+class nsAutoRefTraits<FcFontSet> : public nsPointerRefTraits<FcFontSet>
+{
+public:
+    static void Release(FcFontSet *ptr) { FcFontSetDestroy(ptr); }
+};
+
+template <>
+class nsAutoRefTraits<FcObjectSet> : public nsPointerRefTraits<FcObjectSet>
+{
+public:
+    static void Release(FcObjectSet *ptr) { FcObjectSetDestroy(ptr); }
+};
 
 static const FcChar8*
 ToFcChar8Ptr(const char* aStr)
@@ -610,7 +625,7 @@ PrepareFontOptions(FcPattern* aPattern,
             // subpixel_order won't be used by the font as we won't use
             // CAIRO_ANTIALIAS_SUBPIXEL, but don't leave it at default for
             // caching reasons described above.  Fall through:
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
         case FC_RGBA_RGB:
             subpixel_order = CAIRO_SUBPIXEL_ORDER_RGB;
             break;
@@ -1078,14 +1093,29 @@ gfxFontconfigFont::gfxFontconfigFont(cairo_scaled_font_t *aScaledFont,
                                      gfxFloat aAdjustedSize,
                                      gfxFontEntry *aFontEntry,
                                      const gfxFontStyle *aFontStyle,
-                                     bool aNeedsBold) :
-    gfxFontconfigFontBase(aScaledFont, aPattern, aFontEntry, aFontStyle)
+                                     bool aNeedsBold)
+    : gfxFT2FontBase(aScaledFont, aFontEntry, aFontStyle)
+    , mPattern(aPattern)
 {
     mAdjustedSize = aAdjustedSize;
 }
 
 gfxFontconfigFont::~gfxFontconfigFont()
 {
+}
+
+already_AddRefed<ScaledFont>
+gfxFontconfigFont::GetScaledFont(DrawTarget *aTarget)
+{
+    if (!mAzureScaledFont) {
+        mAzureScaledFont =
+            Factory::CreateScaledFontForFontconfigFont(GetCairoScaledFont(),
+                                                       GetPattern(),
+                                                       GetAdjustedSize());
+    }
+
+    RefPtr<ScaledFont> scaledFont(mAzureScaledFont);
+    return scaledFont.forget();
 }
 
 gfxFcPlatformFontList::gfxFcPlatformFontList()

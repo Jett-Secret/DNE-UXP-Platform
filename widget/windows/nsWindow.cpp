@@ -3525,7 +3525,7 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
       if (pseudoIMEContext) {
         return pseudoIMEContext;
       }
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     }
     case NS_NATIVE_TSF_THREAD_MGR:
     case NS_NATIVE_TSF_CATEGORY_MGR:
@@ -3715,22 +3715,21 @@ nsWindow::ClientToWindowSize(const LayoutDeviceIntSize& aClientSize)
 void
 nsWindow::EnableDragDrop(bool aEnable)
 {
-  NS_ASSERTION(mWnd, "nsWindow::EnableDragDrop() called after Destroy()");
+  if (!mWnd) {
+    // Return early if the window already closed
+    return;
+  }
 
   nsresult rv = NS_ERROR_FAILURE;
   if (aEnable) {
     if (!mNativeDragTarget) {
       mNativeDragTarget = new nsNativeDragTarget(this);
       mNativeDragTarget->AddRef();
-      if (SUCCEEDED(::CoLockObjectExternal((LPUNKNOWN)mNativeDragTarget,
-                                           TRUE, FALSE))) {
-        ::RegisterDragDrop(mWnd, (LPDROPTARGET)mNativeDragTarget);
-      }
+      ::RegisterDragDrop(mWnd, (LPDROPTARGET)mNativeDragTarget);
     }
   } else {
     if (mWnd && mNativeDragTarget) {
       ::RevokeDragDrop(mWnd);
-      ::CoLockObjectExternal((LPUNKNOWN)mNativeDragTarget, FALSE, TRUE);
       mNativeDragTarget->DragCancel();
       NS_RELEASE(mNativeDragTarget);
     }
@@ -4368,6 +4367,7 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
          ("Msg Time: %d Click Count: %d\n", curMsgTime, event.mClickCount));
 #endif
 
+#ifdef MOZ_ENABLE_NPAPI
   NPEvent pluginEvent;
 
   switch (aEventMessage) {
@@ -4431,6 +4431,7 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
   pluginEvent.lParam = lParam;
 
   event.mPluginEvent.Copy(pluginEvent);
+#endif // MOZ_ENABLE_NPAPI
 
   // call the event callback
   if (mWidgetListener) {
@@ -7661,7 +7662,7 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
         // compatibility mouse events will do it instead.
         return false;
       }
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case WM_LBUTTONDOWN:
     case WM_RBUTTONDOWN:
     case WM_MBUTTONDOWN:

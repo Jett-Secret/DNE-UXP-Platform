@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -19,7 +18,9 @@
 #ifdef MOZ_APPLEMEDIA
 #include "AppleDecoderModule.h"
 #endif
+#ifdef MOZ_GMP
 #include "GMPDecoderModule.h"
+#endif
 
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/SharedThreadPool.h"
@@ -33,11 +34,6 @@
 #include "H264Converter.h"
 
 #include "AgnosticDecoderModule.h"
-
-#ifdef MOZ_EME
-#include "mozilla/CDMProxy.h"
-#include "EMEDecoderModule.h"
-#endif
 
 #include "DecoderDoctorDiagnostics.h"
 
@@ -205,11 +201,6 @@ PDMFactory::CreateDecoder(const CreateDecoderParams& aParams)
   }
 
   const TrackInfo& config = aParams.mConfig;
-  bool isEncrypted = mEMEPDM && config.mCrypto.mValid;
-
-  if (isEncrypted) {
-    return CreateDecoderWithPDM(mEMEPDM, aParams);
-  }
 
   DecoderDoctorDiagnostics* diagnostics = aParams.mDiagnostics;
   if (diagnostics) {
@@ -221,9 +212,11 @@ PDMFactory::CreateDecoder(const CreateDecoderParams& aParams)
     if (mFFmpegFailedToLoad) {
       diagnostics->SetFFmpegFailedToLoad();
     }
+#ifdef MOZ_GMP
     if (mGMPPDMFailedToStartup) {
       diagnostics->SetGMPPDMFailedToStartup();
     }
+#endif
   }
 
   for (auto& current : mCurrentPDMs) {
@@ -331,9 +324,6 @@ bool
 PDMFactory::Supports(const TrackInfo& aTrackInfo,
                      DecoderDoctorDiagnostics* aDiagnostics) const
 {
-  if (mEMEPDM) {
-    return mEMEPDM->Supports(aTrackInfo, aDiagnostics);
-  }
   RefPtr<PlatformDecoderModule> current = GetDecoder(aTrackInfo, aDiagnostics);
   return !!current;
 }
@@ -384,12 +374,14 @@ PDMFactory::CreatePDMs()
   m = new AgnosticDecoderModule();
   StartupPDM(m);
 
+#ifdef MOZ_GMP
   if (MediaPrefs::PDMGMPEnabled()) {
     m = new GMPDecoderModule();
     mGMPPDMFailedToStartup = !StartupPDM(m);
   } else {
     mGMPPDMFailedToStartup = false;
   }
+#endif
 }
 
 void
@@ -422,9 +414,11 @@ PDMFactory::GetDecoder(const TrackInfo& aTrackInfo,
     if (mFFmpegFailedToLoad) {
       aDiagnostics->SetFFmpegFailedToLoad();
     }
+#ifdef MOZ_GMP
     if (mGMPPDMFailedToStartup) {
       aDiagnostics->SetGMPPDMFailedToStartup();
     }
+#endif
   }
 
   RefPtr<PlatformDecoderModule> pdm;
@@ -436,14 +430,5 @@ PDMFactory::GetDecoder(const TrackInfo& aTrackInfo,
   }
   return pdm.forget();
 }
-
-#ifdef MOZ_EME
-void
-PDMFactory::SetCDMProxy(CDMProxy* aProxy)
-{
-  RefPtr<PDMFactory> m = new PDMFactory();
-  mEMEPDM = new EMEDecoderModule(aProxy, m);
-}
-#endif
 
 }  // namespace mozilla

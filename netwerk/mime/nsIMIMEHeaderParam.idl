@@ -1,6 +1,4 @@
 /* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim:expandtab:shiftwidth=4:tabstop=4:
- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,7 +10,7 @@
 
 #include "nsISupports.idl"
 
-[scriptable, uuid(9c9252a1-fdaf-40a2-9c2b-a3dc45e28dde)]
+[scriptable, uuid(6e8476d5-ba95-4fee-85d9-f96729b387d8)]
 interface nsIMIMEHeaderParam : nsISupports {
 
   /** 
@@ -132,7 +130,7 @@ interface nsIMIMEHeaderParam : nsISupports {
    */
 
   [noscript]
-  string getParameterInternal(in string aHeaderVal,
+  string getParameterInternal(in ACString aHeaderVal,
                               in string aParamName,
                               out string aCharset,
                               out string aLang);

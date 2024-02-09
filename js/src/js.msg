@@ -150,8 +150,8 @@ MSG_DEF(JSMSG_PARAMETER_AFTER_REST,    0, JSEXN_SYNTAXERR, "parameter after rest
 MSG_DEF(JSMSG_TOO_MANY_ARGUMENTS,      0, JSEXN_RANGEERR, "too many arguments provided for a function call")
 
 // CSP
-MSG_DEF(JSMSG_CSP_BLOCKED_EVAL,        0, JSEXN_ERR, "call to eval() blocked by CSP")
-MSG_DEF(JSMSG_CSP_BLOCKED_FUNCTION,    0, JSEXN_ERR, "call to Function() blocked by CSP")
+MSG_DEF(JSMSG_CSP_BLOCKED_EVAL,        0, JSEXN_EVALERR, "call to eval() blocked by CSP")
+MSG_DEF(JSMSG_CSP_BLOCKED_FUNCTION,    0, JSEXN_EVALERR, "call to Function() blocked by CSP")
 
 // Wrappers
 MSG_DEF(JSMSG_ACCESSOR_DEF_DENIED,     1, JSEXN_ERR, "Permission denied to define accessor property {0}")
@@ -216,6 +216,7 @@ MSG_DEF(JSMSG_BAD_SWITCH,              0, JSEXN_SYNTAXERR, "invalid switch state
 MSG_DEF(JSMSG_BAD_SUPER,               0, JSEXN_SYNTAXERR, "invalid use of keyword 'super'")
 MSG_DEF(JSMSG_BAD_SUPERPROP,           1, JSEXN_SYNTAXERR, "use of super {0} accesses only valid within methods or eval code within methods")
 MSG_DEF(JSMSG_BAD_SUPERCALL,           0, JSEXN_SYNTAXERR, "super() is only valid in derived class constructors")
+MSG_DEF(JSMSG_BAD_ARGUMENTS,           0, JSEXN_SYNTAXERR, "arguments is not valid in fields")
 MSG_DEF(JSMSG_BRACKET_AFTER_ARRAY_COMPREHENSION, 0, JSEXN_SYNTAXERR, "missing ] after array comprehension")
 MSG_DEF(JSMSG_BRACKET_AFTER_LIST,      0, JSEXN_SYNTAXERR, "missing ] after element list")
 MSG_DEF(JSMSG_BRACKET_IN_INDEX,        0, JSEXN_SYNTAXERR, "missing ] in index expression")
@@ -264,7 +265,9 @@ MSG_DEF(JSMSG_FROM_AFTER_IMPORT_CLAUSE, 0, JSEXN_SYNTAXERR, "missing keyword 'fr
 MSG_DEF(JSMSG_FROM_AFTER_EXPORT_STAR,  0, JSEXN_SYNTAXERR, "missing keyword 'from' after export *")
 MSG_DEF(JSMSG_GARBAGE_AFTER_INPUT,     2, JSEXN_SYNTAXERR, "unexpected garbage after {0}, starting with {1}")
 MSG_DEF(JSMSG_IDSTART_AFTER_NUMBER,    0, JSEXN_SYNTAXERR, "identifier starts immediately after numeric literal")
+MSG_DEF(JSMSG_MISSING_PRIVATE_NAME,    0, JSEXN_SYNTAXERR, "'#' not followed by identifier")
 MSG_DEF(JSMSG_ILLEGAL_CHARACTER,       0, JSEXN_SYNTAXERR, "illegal character")
+MSG_DEF(JSMSG_IMPORT_META_OUTSIDE_MODULE, 0, JSEXN_SYNTAXERR, "import.meta may only appear in a module")
 MSG_DEF(JSMSG_IMPORT_DECL_AT_TOP_LEVEL, 0, JSEXN_SYNTAXERR, "import declarations may only appear at top level of a module")
 MSG_DEF(JSMSG_OF_AFTER_FOR_LOOP_DECL,  0, JSEXN_SYNTAXERR, "a declaration in the head of a for-of loop can't have an initializer")
 MSG_DEF(JSMSG_IN_AFTER_LEXICAL_FOR_DECL,0,JSEXN_SYNTAXERR, "a lexical declaration in the head of a for-in loop can't have an initializer")
@@ -328,7 +331,6 @@ MSG_DEF(JSMSG_STMT_AFTER_RETURN,       0, JSEXN_WARN, "unreachable code after re
 MSG_DEF(JSMSG_STRICT_CODE_WITH,        0, JSEXN_SYNTAXERR, "strict mode code may not contain 'with' statements")
 MSG_DEF(JSMSG_STRICT_NON_SIMPLE_PARAMS, 1, JSEXN_SYNTAXERR, "\"use strict\" not allowed in function with {0} parameter")
 MSG_DEF(JSMSG_TEMPLSTR_UNTERM_EXPR,    0, JSEXN_SYNTAXERR, "missing } in template string")
-MSG_DEF(JSMSG_SIMD_NOT_A_VECTOR,       2, JSEXN_TYPEERR, "expecting a SIMD {0} object as argument {1}")
 MSG_DEF(JSMSG_TOO_MANY_CASES,          0, JSEXN_INTERNALERR, "too many switch cases")
 MSG_DEF(JSMSG_TOO_MANY_CATCH_VARS,     0, JSEXN_SYNTAXERR, "too many catch variables")
 MSG_DEF(JSMSG_TOO_MANY_CON_ARGS,       0, JSEXN_SYNTAXERR, "too many constructor arguments")
@@ -338,11 +340,13 @@ MSG_DEF(JSMSG_TOO_MANY_LOCALS,         0, JSEXN_SYNTAXERR, "too many local varia
 MSG_DEF(JSMSG_TOO_MANY_YIELDS,         0, JSEXN_SYNTAXERR, "too many yield expressions")
 MSG_DEF(JSMSG_TOUGH_BREAK,             0, JSEXN_SYNTAXERR, "unlabeled break must be inside loop or switch")
 MSG_DEF(JSMSG_UNEXPECTED_TOKEN,        2, JSEXN_SYNTAXERR, "expected {0}, got {1}")
+MSG_DEF(JSMSG_UNEXPECTED_TOKEN_NO_EXPECT,  1, JSEXN_SYNTAXERR, "unexpected token: {0}")
 MSG_DEF(JSMSG_UNEXPECTED_PARAMLIST_END,0, JSEXN_SYNTAXERR, "unexpected end of function parameter list")
 MSG_DEF(JSMSG_UNNAMED_CLASS_STMT,      0, JSEXN_SYNTAXERR, "class statement requires a name")
 MSG_DEF(JSMSG_UNNAMED_FUNCTION_STMT,   0, JSEXN_SYNTAXERR, "function statement requires a name")
 MSG_DEF(JSMSG_UNTERMINATED_COMMENT,    0, JSEXN_SYNTAXERR, "unterminated comment")
 MSG_DEF(JSMSG_UNTERMINATED_REGEXP,     0, JSEXN_SYNTAXERR, "unterminated regular expression literal")
+MSG_DEF(JSMSG_UNTERMINATED_STATIC_CLASS_BLOCK, 0, JSEXN_SYNTAXERR, "unterminated static class block")
 MSG_DEF(JSMSG_UNTERMINATED_STRING,     0, JSEXN_SYNTAXERR, "unterminated string literal")
 MSG_DEF(JSMSG_USELESS_EXPR,            0, JSEXN_TYPEERR, "useless expression")
 MSG_DEF(JSMSG_USE_ASM_DIRECTIVE_FAIL,  0, JSEXN_SYNTAXERR, "\"use asm\" is only meaningful in the Directive Prologue of a function body")
@@ -358,6 +362,8 @@ MSG_DEF(JSMSG_BAD_NEWTARGET,           0, JSEXN_SYNTAXERR, "new.target only allo
 MSG_DEF(JSMSG_BAD_NEW_OPTIONAL,        0, JSEXN_SYNTAXERR, "new keyword cannot be used with an optional chain")
 MSG_DEF(JSMSG_BAD_OPTIONAL_TEMPLATE,   0, JSEXN_SYNTAXERR, "tagged template cannot be used with optional chain")
 MSG_DEF(JSMSG_ESCAPED_KEYWORD,         0, JSEXN_SYNTAXERR, "keywords must be written literally, without embedded escapes")
+MSG_DEF(JSMSG_FIELDS_NOT_SUPPORTED,    0, JSEXN_SYNTAXERR, "fields are not currently supported")
+MSG_DEF(JSMSG_ILLEGAL_PRIVATE_NAME,    0, JSEXN_SYNTAXERR, "private names aren't valid in this context")
 
 // asm.js
 MSG_DEF(JSMSG_USE_ASM_TYPE_FAIL,       1, JSEXN_TYPEERR, "asm.js type error: {0}")
@@ -478,10 +484,10 @@ MSG_DEF(JSMSG_DEBUG_PROMISE_NOT_REJECTED, 0, JSEXN_TYPEERR, "Promise hasn't been
 MSG_DEF(JSMSG_TRACELOGGER_ENABLE_FAIL, 1, JSEXN_ERR, "enabling tracelogger failed: {0}")
 
 // Intl
-MSG_DEF(JSMSG_DATE_NOT_FINITE,         0, JSEXN_RANGEERR, "date value is not finite in DateTimeFormat.format()")
+MSG_DEF(JSMSG_DATE_NOT_FINITE,         2, JSEXN_RANGEERR, "date value is not finite in {0}.{1}()")
+MSG_DEF(JSMSG_DUPLICATE_VARIANT_SUBTAG, 1, JSEXN_RANGEERR, "duplicate variant subtag: {0}")
 MSG_DEF(JSMSG_INTERNAL_INTL_ERROR,     0, JSEXN_ERR, "internal error while computing Intl data")
 MSG_DEF(JSMSG_INTL_OBJECT_NOT_INITED,  3, JSEXN_TYPEERR, "Intl.{0}.prototype.{1} called on value that's not an object initialized as a {2}")
-MSG_DEF(JSMSG_INTL_OBJECT_REINITED,    0, JSEXN_TYPEERR, "can't initialize object twice as an object of an Intl constructor")
 MSG_DEF(JSMSG_INVALID_CURRENCY_CODE,   1, JSEXN_RANGEERR, "invalid currency code in NumberFormat(): {0}")
 MSG_DEF(JSMSG_INVALID_DIGITS_VALUE,    1, JSEXN_RANGEERR, "invalid digits value: {0}")
 MSG_DEF(JSMSG_INVALID_KEYS_TYPE,       0, JSEXN_TYPEERR, "calendar info keys must be an object or undefined")
@@ -491,6 +497,8 @@ MSG_DEF(JSMSG_INVALID_LOCALES_ELEMENT, 0, JSEXN_TYPEERR, "invalid element in loc
 MSG_DEF(JSMSG_INVALID_LOCALE_MATCHER,  1, JSEXN_RANGEERR, "invalid locale matcher in supportedLocalesOf(): {0}")
 MSG_DEF(JSMSG_INVALID_OPTION_VALUE,    2, JSEXN_RANGEERR, "invalid value {1} for option {0}")
 MSG_DEF(JSMSG_INVALID_TIME_ZONE,       1, JSEXN_RANGEERR, "invalid time zone in DateTimeFormat(): {0}")
+MSG_DEF(JSMSG_INVALID_DATETIME_OPTION, 2, JSEXN_TYPEERR, "can't set option {0} when {1} is used")
+MSG_DEF(JSMSG_INVALID_DATETIME_STYLE,  2, JSEXN_TYPEERR, "can't set option {0} in Date.{1}()")
 MSG_DEF(JSMSG_UNDEFINED_CURRENCY,      0, JSEXN_TYPEERR, "undefined currency in NumberFormat() with currency style")
 
 // RegExp
@@ -524,15 +532,13 @@ MSG_DEF(JSMSG_INVALID_NAMED_CAPTURE_REF,   0, JSEXN_SYNTAXERR, "invalid named ca
 MSG_DEF(JSMSG_DEFAULT_LOCALE_ERROR,    0, JSEXN_ERR, "internal error getting the default locale")
 MSG_DEF(JSMSG_NO_SUCH_SELF_HOSTED_PROP,1, JSEXN_ERR, "No such property on self-hosted object: {0}")
 
-// Typed object / SIMD
+// Typed object
 MSG_DEF(JSMSG_INVALID_PROTOTYPE,       0, JSEXN_TYPEERR, "prototype field is not an object")
 MSG_DEF(JSMSG_TYPEDOBJECT_BAD_ARGS,    0, JSEXN_TYPEERR, "invalid arguments")
 MSG_DEF(JSMSG_TYPEDOBJECT_BINARYARRAY_BAD_INDEX, 0, JSEXN_RANGEERR, "invalid or out-of-range index")
 MSG_DEF(JSMSG_TYPEDOBJECT_HANDLE_UNATTACHED, 0, JSEXN_TYPEERR, "handle unattached")
 MSG_DEF(JSMSG_TYPEDOBJECT_STRUCTTYPE_BAD_ARGS, 0, JSEXN_RANGEERR, "invalid field descriptor")
 MSG_DEF(JSMSG_TYPEDOBJECT_TOO_BIG,     0, JSEXN_ERR, "Type is too large to allocate")
-MSG_DEF(JSMSG_SIMD_FAILED_CONVERSION,  0, JSEXN_RANGEERR, "SIMD conversion loses precision")
-MSG_DEF(JSMSG_SIMD_TO_NUMBER,          0, JSEXN_TYPEERR, "can't convert SIMD value to number")
 
 // Array
 MSG_DEF(JSMSG_TOO_LONG_ARRAY,         0, JSEXN_TYPEERR, "Too long array")
@@ -590,6 +596,9 @@ MSG_DEF(JSMSG_AMBIGUOUS_IMPORT,          0, JSEXN_SYNTAXERR, "ambiguous import")
 MSG_DEF(JSMSG_MISSING_NAMESPACE_EXPORT,  0, JSEXN_SYNTAXERR, "export not found for namespace")
 MSG_DEF(JSMSG_MISSING_EXPORT,            1, JSEXN_SYNTAXERR, "local binding for export '{0}' not found")
 MSG_DEF(JSMSG_BAD_MODULE_STATUS,         0, JSEXN_INTERNALERR, "module record has unexpected status")
+MSG_DEF(JSMSG_NO_DYNAMIC_IMPORT,         0, JSEXN_SYNTAXERR, "dynamic module import is not implemented")
+MSG_DEF(JSMSG_DYNAMIC_IMPORT_FAILED,     0, JSEXN_TYPEERR, "error loading dynamically imported module")
+MSG_DEF(JSMSG_BAD_MODULE_SPECIFIER,      1, JSEXN_TYPEERR, "error resolving module specifier '{0}'")
 
 // Promise
 MSG_DEF(JSMSG_CANNOT_RESOLVE_PROMISE_WITH_ITSELF,       0, JSEXN_TYPEERR, "A promise cannot be resolved with itself.")
@@ -597,13 +606,52 @@ MSG_DEF(JSMSG_PROMISE_CAPABILITY_HAS_SOMETHING_ALREADY, 0, JSEXN_TYPEERR, "GetCa
 MSG_DEF(JSMSG_PROMISE_RESOLVE_FUNCTION_NOT_CALLABLE,    0, JSEXN_TYPEERR, "A Promise subclass passed a non-callable value as the resolve function.")
 MSG_DEF(JSMSG_PROMISE_REJECT_FUNCTION_NOT_CALLABLE,     0, JSEXN_TYPEERR, "A Promise subclass passed a non-callable value as the reject function.")
 MSG_DEF(JSMSG_PROMISE_ERROR_IN_WRAPPED_REJECTION_REASON,0, JSEXN_INTERNALERR, "Promise rejection value is a non-unwrappable cross-compartment wrapper.")
+MSG_DEF(JSMSG_PROMISE_ANY_REJECTION, 0, JSEXN_AGGREGATEERR, "No Promise in Promise.any was resolved")
 
 // Iterator
 MSG_DEF(JSMSG_RETURN_NOT_CALLABLE,     0, JSEXN_TYPEERR, "property 'return' of iterator is not callable")
 MSG_DEF(JSMSG_ITERATOR_NO_THROW,       0, JSEXN_TYPEERR, "iterator does not have a 'throw' method")
 
 // Async Iteration
-MSG_DEF(JSMSG_FOR_AWAIT_NOT_OF,        0, JSEXN_TYPEERR, "'for await' loop should be used with 'of'")
+MSG_DEF(JSMSG_FOR_AWAIT_NOT_OF,        0, JSEXN_SYNTAXERR, "'for await' loop should be used with 'of'")
 MSG_DEF(JSMSG_NOT_AN_ASYNC_GENERATOR,  0, JSEXN_TYPEERR, "Not an async generator")
 MSG_DEF(JSMSG_NOT_AN_ASYNC_ITERATOR,   0, JSEXN_TYPEERR, "Not an async from sync iterator")
 MSG_DEF(JSMSG_GET_ASYNC_ITER_RETURNED_PRIMITIVE, 0, JSEXN_TYPEERR, "[Symbol.asyncIterator]() returned a non-object value")
+
+// ReadableStream
+MSG_DEF(JSMSG_READABLESTREAM_UNDERLYINGSOURCE_TYPE_WRONG,0, JSEXN_RANGEERR,"'underlyingSource.type' must be \"bytes\" or undefined.")
+MSG_DEF(JSMSG_READABLESTREAM_INVALID_READER_MODE,        0, JSEXN_RANGEERR,"'mode' must be \"byob\" or undefined.")
+MSG_DEF(JSMSG_NUMBER_MUST_BE_FINITE_NON_NEGATIVE, 1, JSEXN_RANGEERR, "'{0}' must be a finite, non-negative number.")
+MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_INVALID_BYTESWRITTEN, 0, JSEXN_RANGEERR, "'bytesWritten' exceeds remaining length.")
+MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_INVALID_VIEW_SIZE, 0, JSEXN_RANGEERR, "view size does not match requested data.")
+MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_INVALID_VIEW_OFFSET, 0, JSEXN_RANGEERR, "view offset does not match requested position.")
+MSG_DEF(JSMSG_READABLESTREAM_NOT_LOCKED,                 1, JSEXN_TYPEERR, "'{0}' may only be called on a locked stream.")
+MSG_DEF(JSMSG_READABLESTREAM_LOCKED,                     0, JSEXN_TYPEERR, "A Reader may only be created for an unlocked ReadableStream.")
+MSG_DEF(JSMSG_READABLESTREAM_NOT_BYTE_STREAM_CONTROLLER, 1, JSEXN_TYPEERR, "{0} requires a ReadableByteStreamController.")
+MSG_DEF(JSMSG_READABLESTREAM_NOT_DEFAULT_CONTROLLER,     1, JSEXN_TYPEERR, "{0} requires a ReadableStreamDefaultController.")
+MSG_DEF(JSMSG_READABLESTREAM_CONTROLLER_SET,             0, JSEXN_TYPEERR, "The ReadableStream already has a controller defined.")
+MSG_DEF(JSMSG_READABLESTREAMREADER_NOT_OWNED,            1, JSEXN_TYPEERR, "The ReadableStream reader method '{0}' may only be called on a reader owned by a stream.")
+MSG_DEF(JSMSG_READABLESTREAMREADER_NOT_EMPTY,            1, JSEXN_TYPEERR, "The ReadableStream reader method '{0}' may not be called on a reader with read requests.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREADER_READ_EMPTY_VIEW,  0, JSEXN_TYPEERR, "ReadableStreamBYOBReader.read() was passed an empty TypedArrayBuffer view.")
+MSG_DEF(JSMSG_READABLESTREAMREADER_RELEASED,             0, JSEXN_TYPEERR, "The ReadableStream reader was released.")
+MSG_DEF(JSMSG_READABLESTREAMCONTROLLER_CLOSED,           1, JSEXN_TYPEERR, "'{0}' called on a stream already closing.")
+MSG_DEF(JSMSG_READABLESTREAMCONTROLLER_NOT_READABLE,     1, JSEXN_TYPEERR, "'{0}' may only be called on a stream in the 'readable' state.")
+MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_BAD_CHUNKSIZE,0, JSEXN_RANGEERR, "ReadableByteStreamController requires a positive integer or undefined for 'autoAllocateChunkSize'.")
+MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_BAD_CHUNK,    1, JSEXN_TYPEERR, "{0} passed a bad chunk.")
+MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_CLOSE_PENDING_PULL, 0, JSEXN_TYPEERR, "The ReadableByteStreamController cannot be closed while the buffer is being filled.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_NO_CONTROLLER,   1, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method '{0}' called on a request with no controller.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_CLOSED,  0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' called with non-zero number of bytes with a closed controller.")
+MSG_DEF(JSMSG_READABLESTREAM_METHOD_NOT_IMPLEMENTED,     1, JSEXN_TYPEERR, "ReadableStream method {0} not yet implemented")
+
+// Other Stream-related
+MSG_DEF(JSMSG_STREAM_INVALID_HIGHWATERMARK,             0, JSEXN_RANGEERR, "'highWaterMark' must be a non-negative, non-NaN number.")
+
+// BigInt
+MSG_DEF(JSMSG_BIGINT_TO_NUMBER, 0, JSEXN_TYPEERR, "can't convert BigInt to number")
+MSG_DEF(JSMSG_NUMBER_TO_BIGINT, 0, JSEXN_RANGEERR, "can't convert non-finite number to BigInt")
+MSG_DEF(JSMSG_BIGINT_TOO_LARGE, 0, JSEXN_RANGEERR, "BigInt is too large to allocate")
+MSG_DEF(JSMSG_BIGINT_DIVISION_BY_ZERO, 0, JSEXN_RANGEERR, "BigInt division by zero")
+MSG_DEF(JSMSG_BIGINT_NEGATIVE_EXPONENT, 0, JSEXN_RANGEERR, "BigInt negative exponent")
+MSG_DEF(JSMSG_BIGINT_INVALID_SYNTAX, 0, JSEXN_SYNTAXERR, "invalid BigInt syntax")
+MSG_DEF(JSMSG_NOT_BIGINT, 0, JSEXN_TYPEERR, "not a BigInt")
+MSG_DEF(JSMSG_BIGINT_NOT_SERIALIZABLE, 0, JSEXN_TYPEERR, "BigInt value can't be serialized in JSON")

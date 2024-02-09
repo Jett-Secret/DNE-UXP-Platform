@@ -29,7 +29,25 @@ using namespace workers;
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Request)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Request)
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Request, mOwner, mHeaders)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(Request)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Request)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mOwner)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mHeaders)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Request)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwner)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHeaders)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(Request)
+  MOZ_DIAGNOSTIC_ASSERT(!tmp->mReadableStreamReader);
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mReadableStreamReader)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Request)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -37,8 +55,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Request)
 NS_INTERFACE_MAP_END
 
 Request::Request(nsIGlobalObject* aOwner, InternalRequest* aRequest, AbortSignal* aSignal)
-  : FetchBody<Request>()
-  , mOwner(aOwner)
+  : FetchBody<Request>(aOwner)
   , mRequest(aRequest)
   , mSignal(aSignal)
 {
@@ -313,7 +330,8 @@ Request::Constructor(const GlobalObject& aGlobal,
     nsAutoString requestURL;
     nsCString fragment;
     if (NS_IsMainThread()) {
-      nsIDocument* doc = GetEntryDocument();
+      nsCOMPtr<nsPIDOMWindowInner> inner(do_QueryInterface(global));
+      nsIDocument* doc = inner ? inner->GetExtantDoc() : nullptr;
       if (doc) {
         GetRequestURLFromDocument(doc, input, requestURL, fragment, aRv);
       } else {
@@ -362,7 +380,8 @@ Request::Constructor(const GlobalObject& aGlobal,
     } else {
       nsAutoString referrerURL;
       if (NS_IsMainThread()) {
-        nsIDocument* doc = GetEntryDocument();
+        nsCOMPtr<nsPIDOMWindowInner> inner(do_QueryInterface(global));
+        nsIDocument* doc = inner ? inner->GetExtantDoc() : nullptr;
         nsCOMPtr<nsIURI> uri;
         if (doc) {
           uri = ParseURLFromDocument(doc, referrer, aRv);
@@ -555,17 +574,15 @@ Request::Constructor(const GlobalObject& aGlobal,
   }
 
   if (aInit.mBody.WasPassed()) {
-    const Nullable<OwningArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams>& bodyInitNullable =
-      aInit.mBody.Value();
+    const Nullable<fetch::OwningBodyInit>& bodyInitNullable = aInit.mBody.Value();
     if (!bodyInitNullable.IsNull()) {
-      const OwningArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams& bodyInit =
-        bodyInitNullable.Value();
+      const fetch::OwningBodyInit& bodyInit = bodyInitNullable.Value();
       nsCOMPtr<nsIInputStream> stream;
-      nsAutoCString contentType;
+      nsAutoCString contentTypeWithCharset;
       uint64_t contentLengthUnused;
       aRv = ExtractByteStreamFromBody(bodyInit,
                                       getter_AddRefs(stream),
-                                      contentType,
+                                      contentTypeWithCharset,
                                       contentLengthUnused);
       if (NS_WARN_IF(aRv.Failed())) {
         return nullptr;
@@ -573,10 +590,10 @@ Request::Constructor(const GlobalObject& aGlobal,
 
       temporaryBody = stream;
 
-      if (!contentType.IsVoid() &&
+      if (!contentTypeWithCharset.IsVoid() &&
           !requestHeaders->Has(NS_LITERAL_CSTRING("Content-Type"), aRv)) {
         requestHeaders->Append(NS_LITERAL_CSTRING("Content-Type"),
-                               contentType, aRv);
+                               contentTypeWithCharset, aRv);
       }
 
       if (NS_WARN_IF(aRv.Failed())) {
@@ -597,7 +614,10 @@ Request::Constructor(const GlobalObject& aGlobal,
     inputReq->GetBody(getter_AddRefs(body));
     if (body) {
       inputReq->SetBody(nullptr);
-      inputReq->SetBodyUsed();
+      inputReq->SetBodyUsed(aGlobal.Context(), aRv);
+      if (NS_WARN_IF(aRv.Failed())) {
+        return nullptr;
+      }
     }
   }
   return domRequest.forget();

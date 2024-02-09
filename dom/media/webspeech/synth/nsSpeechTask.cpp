@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -60,15 +59,30 @@ public:
     switch (event) {
       case MediaStreamGraphEvent::EVENT_FINISHED:
         {
+          RefPtr<SynthStreamListener> self = this;
           if (!mStarted) {
             mStarted = true;
-            nsCOMPtr<nsIRunnable> startRunnable =
-              NewRunnableMethod(this, &SynthStreamListener::DoNotifyStarted);
+            nsCOMPtr<nsIRunnable> startRunnable = NS_NewRunnableFunction(
+              [self] {
+                // "start" event will be fired in DoNotifyStarted() which is
+                // not allowed in stable state, so we do it asynchronously in
+                // next run.
+                NS_DispatchToMainThread(NewRunnableMethod(
+                  self,
+                  &SynthStreamListener::DoNotifyStarted));
+              });
             aGraph->DispatchToMainThreadAfterStreamStateUpdate(startRunnable.forget());
           }
 
-          nsCOMPtr<nsIRunnable> endRunnable =
-            NewRunnableMethod(this, &SynthStreamListener::DoNotifyFinished);
+          nsCOMPtr<nsIRunnable> endRunnable = NS_NewRunnableFunction(
+            [self] {
+              // "end" event will be fired in DoNotifyFinished() which is
+              // not allowed in stable state, so we do it asynchronously in
+              // next run.
+              NS_DispatchToMainThread(NewRunnableMethod(
+                self,
+                &SynthStreamListener::DoNotifyFinished));
+            });
           aGraph->DispatchToMainThreadAfterStreamStateUpdate(endRunnable.forget());
         }
         break;
@@ -86,8 +100,16 @@ public:
   {
     if (aBlocked == MediaStreamListener::UNBLOCKED && !mStarted) {
       mStarted = true;
-      nsCOMPtr<nsIRunnable> event =
-        NewRunnableMethod(this, &SynthStreamListener::DoNotifyStarted);
+      RefPtr<SynthStreamListener> self = this;
+      nsCOMPtr<nsIRunnable> event = NS_NewRunnableFunction(
+        [self] {
+          // "start" event will be fired in DoNotifyStarted() which is
+          // not allowed in stable state, so we do it asynchronously in
+          // next run.
+          NS_DispatchToMainThread(NewRunnableMethod(
+            self,
+            &SynthStreamListener::DoNotifyStarted));
+        });
       aGraph->DispatchToMainThreadAfterStreamStateUpdate(event.forget());
     }
   }

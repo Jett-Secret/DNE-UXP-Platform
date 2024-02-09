@@ -25,6 +25,7 @@ namespace mozilla {
 namespace layers {
 class Image;
 class ImageContainer;
+class KnowsCompositor;
 } // namespace layers
 
 class MediaByteBuffer;
@@ -449,6 +450,7 @@ public:
 
     Plane mPlanes[3];
     YUVColorSpace mYUVColorSpace = YUVColorSpace::BT601;
+    ColorRange mColorRange = ColorRange::LIMITED;
   };
 
   // Constructs a VideoData object. If aImage is nullptr, creates a new Image
@@ -469,6 +471,18 @@ public:
                                                        int64_t aTime,
                                                        int64_t aDuration,
                                                        const YCbCrBuffer &aBuffer,
+                                                       bool aKeyframe,
+                                                       int64_t aTimecode,
+                                                       const IntRect& aPicture,
+                                                       layers::KnowsCompositor* aAllocator = nullptr);
+
+  static already_AddRefed<VideoData> CreateAndCopyData(const VideoInfo& aInfo,
+                                                       ImageContainer* aContainer,
+                                                       int64_t aOffset,
+                                                       int64_t aTime,
+                                                       int64_t aDuration,
+                                                       const YCbCrBuffer &aBuffer,
+                                                       const YCbCrBuffer::Plane &aAlphaPlane,
                                                        bool aKeyframe,
                                                        int64_t aTimecode,
                                                        const IntRect& aPicture);
@@ -621,15 +635,22 @@ private:
 class MediaRawData : public MediaData {
 public:
   MediaRawData();
-  MediaRawData(const uint8_t* aData, size_t mSize);
+  MediaRawData(const uint8_t* aData, size_t aSize);
+  MediaRawData(const uint8_t* aData, size_t aSize,
+               const uint8_t* aAlphaData, size_t aAlphaSize);
 
   // Pointer to data or null if not-yet allocated
   const uint8_t* Data() const { return mBuffer.Data(); }
+  // Pointer to alpha data or null if not-yet allocated
+  const uint8_t* AlphaData() const { return mAlphaBuffer.Data(); }
   // Size of buffer.
   size_t Size() const { return mBuffer.Length(); }
+  size_t AlphaSize() const { return mAlphaBuffer.Length(); }
   size_t ComputedSizeOfIncludingThis() const
   {
-    return sizeof(*this) + mBuffer.ComputedSizeOfExcludingThis();
+    return sizeof(*this)
+           + mBuffer.ComputedSizeOfExcludingThis()
+           + mAlphaBuffer.ComputedSizeOfExcludingThis();
   }
   // Access the buffer as a Span.
   operator Span<const uint8_t>() { return MakeSpan(Data(), Size()); }
@@ -660,6 +681,7 @@ protected:
 private:
   friend class MediaRawDataWriter;
   AlignedByteBuffer mBuffer;
+  AlignedByteBuffer mAlphaBuffer;
   CryptoSample mCryptoInternal;
   MediaRawData(const MediaRawData&); // Not implemented
 };

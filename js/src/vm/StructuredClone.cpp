@@ -31,6 +31,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/RangedPtr.h"
 
 #include <algorithm>
 
@@ -38,6 +39,8 @@
 #include "jscntxt.h"
 #include "jsdate.h"
 #include "jswrapper.h"
+
+#include "vm/BigIntType.h"
 
 #include "builtin/MapObject.h"
 #include "js/Date.h"
@@ -57,6 +60,7 @@ using mozilla::IsNaN;
 using mozilla::LittleEndian;
 using mozilla::NativeEndian;
 using mozilla::NumbersAreIdentical;
+using mozilla::RangedPtr;
 using JS::CanonicalizeNaN;
 
 // When you make updates here, make sure you consider whether you need to bump the
@@ -104,6 +108,9 @@ enum StructuredDataType : uint32_t {
 
     SCTAG_SHARED_ARRAY_BUFFER_OBJECT,
 
+    SCTAG_BIGINT,
+    SCTAG_BIGINT_OBJECT,
+
     SCTAG_TYPED_ARRAY_V1_MIN = 0xFFFF0100,
     SCTAG_TYPED_ARRAY_V1_INT8 = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Int8,
     SCTAG_TYPED_ARRAY_V1_UINT8 = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Uint8,
@@ -114,7 +121,8 @@ enum StructuredDataType : uint32_t {
     SCTAG_TYPED_ARRAY_V1_FLOAT32 = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Float32,
     SCTAG_TYPED_ARRAY_V1_FLOAT64 = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Float64,
     SCTAG_TYPED_ARRAY_V1_UINT8_CLAMPED = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::Uint8Clamped,
-    SCTAG_TYPED_ARRAY_V1_MAX = SCTAG_TYPED_ARRAY_V1_MIN + Scalar::MaxTypedArrayViewType - 1,
+    // BigInt64 and BigUint64 are not supported in the v1 format.
+    SCTAG_TYPED_ARRAY_V1_MAX = SCTAG_TYPED_ARRAY_V1_UINT8_CLAMPED,
 
     /*
      * Define a separate range of numbers for Transferable-only tags, since
@@ -349,6 +357,8 @@ struct JSStructuredCloneReader {
     JSString* readStringImpl(uint32_t nchars);
     JSString* readString(uint32_t data);
 
+    BigInt* readBigInt(uint32_t data);
+
     bool checkDouble(double d);
     bool readTypedArray(uint32_t arrayType, uint32_t nelems, MutableHandleValue vp,
                         bool v1Read = false);
@@ -438,6 +448,8 @@ struct JSStructuredCloneWriter {
     bool traverseMap(HandleObject obj);
     bool traverseSet(HandleObject obj);
     bool traverseSavedFrame(HandleObject obj);
+
+    bool writeBigInt(uint32_t tag, BigInt* bi);
 
     bool reportDataCloneError(uint32_t errorId);
 
@@ -1055,6 +1067,23 @@ JSStructuredCloneWriter::writeString(uint32_t tag, JSString* str)
            : out.writeChars(linear->twoByteChars(nogc), length);
 }
 
+bool
+JSStructuredCloneWriter::writeBigInt(uint32_t tag, BigInt* bi)
+{
+    bool signBit = bi->isNegative();
+    size_t length = bi->digitLength();
+    // The length must fit in 31 bits to leave room for a sign bit.
+    if (length > size_t(INT32_MAX)) {
+        return false;
+    }
+    uint32_t lengthAndSign = length | (static_cast<uint32_t>(signBit) << 31);
+
+    if (!out.writePair(tag, lengthAndSign)) {
+         return false;
+    }
+    return out.writeArray(bi->digits().data(), length);
+}
+
 inline void
 JSStructuredCloneWriter::checkStack()
 {
@@ -1211,7 +1240,16 @@ JSStructuredCloneWriter::traverseObject(HandleObject obj)
     ESClass cls;
     if (!GetBuiltinClass(context(), obj, &cls))
         return false;
-    return out.writePair(cls == ESClass::Array ? SCTAG_ARRAY_OBJECT : SCTAG_OBJECT_OBJECT, 0);
+
+    if (cls == ESClass::Array) {
+        uint32_t length = 0;
+        if (!JS_GetArrayLength(context(), obj, &length))
+            return false;
+
+        return out.writePair(SCTAG_ARRAY_OBJECT, NativeEndian::swapToLittleEndian(length));
+    }
+
+    return out.writePair(SCTAG_OBJECT_OBJECT, 0);
 }
 
 bool
@@ -1388,6 +1426,8 @@ JSStructuredCloneWriter::startWrite(HandleValue v)
         return out.writePair(SCTAG_NULL, 0);
     } else if (v.isUndefined()) {
         return out.writePair(SCTAG_UNDEFINED, 0);
+    } else if (v.isBigInt()) {
+        return writeBigInt(SCTAG_BIGINT, v.toBigInt());
     } else if (v.isObject()) {
         RootedObject obj(context(), &v.toObject());
 
@@ -1402,7 +1442,7 @@ JSStructuredCloneWriter::startWrite(HandleValue v)
             return false;
 
         if (cls == ESClass::RegExp) {
-            RegExpGuard re(context());
+            RootedRegExpShared re(context());
             if (!RegExpToShared(context(), obj, &re))
                 return false;
             return out.writePair(SCTAG_REGEXP_OBJECT, re->getFlags()) &&
@@ -1441,6 +1481,12 @@ JSStructuredCloneWriter::startWrite(HandleValue v)
             return writeString(SCTAG_STRING_OBJECT, unboxed.toString());
         } else if (cls == ESClass::Map) {
             return traverseMap(obj);
+        } else if (cls == ESClass::BigInt) {
+            RootedValue unboxed(context());
+            if (!Unbox(context(), obj, &unboxed)) {
+                return false;
+            }
+            return writeBigInt(SCTAG_BIGINT_OBJECT, unboxed.toBigInt());
         } else if (cls == ESClass::Set) {
             return traverseSet(obj);
         } else if (SavedFrame::isSavedFrameOrWrapperAndNotProto(*obj)) {
@@ -1745,6 +1791,22 @@ JSStructuredCloneReader::readString(uint32_t data)
     return latin1 ? readStringImpl<Latin1Char>(nchars) : readStringImpl<char16_t>(nchars);
 }
 
+BigInt* JSStructuredCloneReader::readBigInt(uint32_t data) {
+    size_t length = data & JS_BITMASK(31);
+    bool isNegative = data & (1 << 31);
+    if (length == 0) {
+        return BigInt::zero(context());
+    }
+    BigInt* result = BigInt::createUninitialized(context(), length, isNegative);
+    if (!result) {
+        return nullptr;
+    }
+    if (!in.readArray(result->digits().data(), length)) {
+        return nullptr;
+    }
+    return result;
+}
+
 static uint32_t
 TagToV1ArrayType(uint32_t tag)
 {
@@ -1756,7 +1818,7 @@ bool
 JSStructuredCloneReader::readTypedArray(uint32_t arrayType, uint32_t nelems, MutableHandleValue vp,
                                         bool v1Read)
 {
-    if (arrayType > Scalar::Uint8Clamped) {
+    if (arrayType > (v1Read ? Scalar::Uint8Clamped : Scalar::BigUint64)) {
         JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr, JSMSG_SC_BAD_SERIALIZED_DATA,
                                   "unhandled typed array element type");
         return false;
@@ -1819,6 +1881,12 @@ JSStructuredCloneReader::readTypedArray(uint32_t arrayType, uint32_t nelems, Mut
         break;
       case Scalar::Uint8Clamped:
         obj = JS_NewUint8ClampedArrayWithBuffer(context(), buffer, byteOffset, nelems);
+        break;
+      case Scalar::BigInt64:
+        obj = JS_NewBigInt64ArrayWithBuffer(context(), buffer, byteOffset, nelems);
+        break;
+      case Scalar::BigUint64:
+        obj = JS_NewBigUint64ArrayWithBuffer(context(), buffer, byteOffset, nelems);
         break;
       default:
         MOZ_CRASH("Can't happen: arrayType range checked above");
@@ -1955,6 +2023,8 @@ JSStructuredCloneReader::readV1ArrayBuffer(uint32_t arrayType, uint32_t nelems,
       case Scalar::Float32:
         return in.readArray((uint32_t*) buffer.dataPointer(), nelems);
       case Scalar::Float64:
+      case Scalar::BigInt64:
+      case Scalar::BigUint64:
         return in.readArray((uint64_t*) buffer.dataPointer(), nelems);
       default:
         MOZ_CRASH("Can't happen: arrayType range checked by caller");
@@ -1976,6 +2046,7 @@ bool
 JSStructuredCloneReader::startRead(MutableHandleValue vp)
 {
     uint32_t tag, data;
+    bool alreadAppended = false;
 
     if (!in.readPair(&tag, &data))
         return false;
@@ -2018,6 +2089,19 @@ JSStructuredCloneReader::startRead(MutableHandleValue vp)
         vp.setDouble(d);
         if (!PrimitiveToObject(context(), vp))
             return false;
+        break;
+      }
+
+      case SCTAG_BIGINT:
+      case SCTAG_BIGINT_OBJECT: {
+        RootedBigInt bi(context(), readBigInt(data));
+        if (!bi) {
+            return false;
+        }
+        vp.setBigInt(bi);
+        if (tag == SCTAG_BIGINT_OBJECT && !PrimitiveToObject(context(), vp)) {
+            return false;
+        }
         break;
       }
 
@@ -2069,7 +2153,7 @@ JSStructuredCloneReader::startRead(MutableHandleValue vp)
       case SCTAG_ARRAY_OBJECT:
       case SCTAG_OBJECT_OBJECT: {
         JSObject* obj = (tag == SCTAG_ARRAY_OBJECT)
-                        ? (JSObject*) NewDenseEmptyArray(context())
+                        ? (JSObject*) NewDenseUnallocatedArray(context(), NativeEndian::swapFromLittleEndian(data))
                         : (JSObject*) NewBuiltinClassInstance<PlainObject>(context());
         if (!obj || !objs.append(ObjectValue(*obj)))
             return false;
@@ -2163,15 +2247,29 @@ JSStructuredCloneReader::startRead(MutableHandleValue vp)
                                       "unsupported type");
             return false;
         }
+
+        // callbacks->read() might read other objects from the buffer.
+        // In startWrite we always write the object itself before calling
+        // the custom function. We should do the same here to keep
+        // indexing consistent.
+        uint32_t placeholderIndex = allObjs.length();
+        Value dummy = UndefinedValue();
+        if (!allObjs.append(dummy)) {
+            return false;
+        }
+
         JSObject* obj = callbacks->read(context(), this, tag, data, closure);
         if (!obj)
             return false;
         vp.setObject(*obj);
+        allObjs[placeholderIndex].set(vp);
+        alreadAppended = true;
       }
     }
 
-    if (vp.isObject() && !allObjs.append(vp))
+    if (!alreadAppended && vp.isObject() && !allObjs.append(vp)) {
         return false;
+    }
 
     return true;
 }
@@ -2745,7 +2843,20 @@ JS_WriteTypedArray(JSStructuredCloneWriter* w, HandleValue v)
     MOZ_ASSERT(v.isObject());
     assertSameCompartment(w->context(), v);
     RootedObject obj(w->context(), &v.toObject());
-    return w->writeTypedArray(obj);
+
+    // startWrite can write everything, thus we should check here
+    // and report error if the user passes a wrong type.
+    if (!JS_IsTypedArrayObject(obj)) {
+        JS_ReportErrorNumberASCII(w->context(), GetErrorMessage, nullptr,
+                                  JSMSG_SC_BAD_SERIALIZED_DATA,
+                                  "expected type array");
+        return false;
+    }
+
+    // We should use startWrite instead of writeTypedArray, because
+    // typed array is an object, we should add it to the |memory|
+    // (allObjs) list. Directly calling writeTypedArray won't add it.
+    return w->startWrite(v);
 }
 
 JS_PUBLIC_API(bool)

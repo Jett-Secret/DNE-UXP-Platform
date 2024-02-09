@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:set ts=2 sts=2 sw=2 et cin:
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -127,7 +126,11 @@ void mozilla::plugins::PluginUtilsOSX::Repaint(void *caLayer, nsIntRect aRect) {
   [CATransaction begin];
   [bridgeLayer updateRect:aRect];
   [bridgeLayer setNeedsDisplay];
+#if defined(MAC_OS_X_VERSION_10_6) && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6)
   [bridgeLayer displayIfNeeded];
+#else
+  [bridgeLayer display];
+#endif
   [CATransaction commit];
 }
 
@@ -186,7 +189,23 @@ NPError mozilla::plugins::PluginUtilsOSX::ShowCocoaContextMenu(void* aMenu, int 
   NSMenu* nsmenu = reinterpret_cast<NSMenu*>(aMenu);
   NSPoint screen_point = ::NSMakePoint(aX, aY);
 
+#if defined(MAC_OS_X_VERSION_10_6) && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6)
   [nsmenu popUpMenuPositioningItem:nil atLocation:screen_point inView:nil];
+#else
+  NSEvent *event = [[NSApplication sharedApplication] currentEvent];
+  NSWindow *window = [event window];
+  NSView *view = [window contentView];
+  NSEvent* fake = [NSEvent mouseEventWithType:NSRightMouseDown
+                                     location:screen_point
+                                modifierFlags:0
+                                    timestamp:[event timestamp]
+                                 windowNumber:[window windowNumber]
+                                      context:[NSGraphicsContext currentContext]
+                                  eventNumber:1
+                                   clickCount:1
+                                     pressure:0.0];
+  [NSMenu popUpContextMenu:nsmenu withEvent:fake forView:view];
+#endif
 
   if (pluginModule) {
     [eventTimer invalidate];

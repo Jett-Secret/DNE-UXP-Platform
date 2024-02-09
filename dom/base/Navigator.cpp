@@ -8,10 +8,14 @@
 
 #include "Navigator.h"
 #include "nsIXULAppInfo.h"
+#ifdef MOZ_ENABLE_NPAPI
 #include "nsPluginArray.h"
+#endif
 #include "nsMimeTypeArray.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/dom/BodyExtractor.h"
 #include "mozilla/dom/DesktopNotification.h"
+#include "mozilla/dom/FetchBinding.h"
 #include "mozilla/dom/File.h"
 #include "nsGeolocation.h"
 #include "nsIClassOfService.h"
@@ -28,6 +32,7 @@
 #include "nsContentUtils.h"
 #include "nsUnicharUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/Clipboard.h"
 #ifdef MOZ_GAMEPAD
 #include "mozilla/dom/GamepadServiceTest.h"
 #endif
@@ -38,6 +43,7 @@
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/StorageManager.h"
 #include "mozilla/dom/TCPSocket.h"
+#include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/dom/workers/RuntimeService.h"
 #include "mozilla/Hal.h"
 #include "nsISiteSpecificUserAgent.h"
@@ -87,11 +93,6 @@
 #include "mozilla/Hal.h"
 #endif
 #include "mozilla/dom/ContentChild.h"
-
-#ifdef MOZ_EME
-#include "mozilla/EMEUtils.h"
-#include "mozilla/DetailedPromise.h"
-#endif
 
 namespace mozilla {
 namespace dom {
@@ -180,7 +181,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMimeTypes)
+#ifdef MOZ_ENABLE_NPAPI
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPlugins)
+#endif
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPermissions)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGeolocation)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNotification)
@@ -195,9 +198,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mServiceWorkerContainer)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
-#ifdef MOZ_EME
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaKeySystemAccessManager)
-#endif
 #ifdef MOZ_GAMEPAD
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGamepadServiceTest)
 #endif
@@ -214,10 +214,12 @@ Navigator::Invalidate()
 
   mMimeTypes = nullptr;
 
+#ifdef MOZ_ENABLE_NPAPI
   if (mPlugins) {
     mPlugins->Invalidate();
     mPlugins = nullptr;
   }
+#endif
 
   mPermissions = nullptr;
 
@@ -257,13 +259,6 @@ Navigator::Invalidate()
   }
 
   mServiceWorkerContainer = nullptr;
-
-#ifdef MOZ_EME
-  if (mMediaKeySystemAccessManager) {
-    mMediaKeySystemAccessManager->Shutdown();
-    mMediaKeySystemAccessManager = nullptr;
-  }
-#endif
 
 #ifdef MOZ_GAMEPAD
   if (mGamepadServiceTest) {
@@ -500,6 +495,7 @@ Navigator::GetMimeTypes(ErrorResult& aRv)
   return mMimeTypes;
 }
 
+#ifdef MOZ_ENABLE_NPAPI
 nsPluginArray*
 Navigator::GetPlugins(ErrorResult& aRv)
 {
@@ -514,6 +510,7 @@ Navigator::GetPlugins(ErrorResult& aRv)
 
   return mPlugins;
 }
+#endif
 
 Permissions*
 Navigator::GetPermissions(ErrorResult& aRv)
@@ -845,8 +842,52 @@ BeaconStreamListener::OnDataAvailable(nsIRequest *aRequest,
 
 bool
 Navigator::SendBeacon(const nsAString& aUrl,
-                      const Nullable<ArrayBufferViewOrBlobOrStringOrFormData>& aData,
+                      const Nullable<fetch::BodyInit>& aData,
                       ErrorResult& aRv)
+{
+  if (aData.IsNull()) {
+    return SendBeaconInternal(aUrl, nullptr, eBeaconTypeOther, aRv);
+  }
+
+  if (aData.Value().IsArrayBuffer()) {
+    BodyExtractor<const ArrayBuffer> body(&aData.Value().GetAsArrayBuffer());
+    return SendBeaconInternal(aUrl, &body, eBeaconTypeOther, aRv);
+  }
+
+  if (aData.Value().IsArrayBufferView()) {
+    BodyExtractor<const ArrayBufferView> body(&aData.Value().GetAsArrayBufferView());
+    return SendBeaconInternal(aUrl, &body, eBeaconTypeOther, aRv);
+  }
+
+  if (aData.Value().IsBlob()) {
+    BodyExtractor<nsIXHRSendable> body(&aData.Value().GetAsBlob());
+    return SendBeaconInternal(aUrl, &body, eBeaconTypeOther, aRv);
+  }
+
+  if (aData.Value().IsFormData()) {
+    BodyExtractor<nsIXHRSendable> body(&aData.Value().GetAsFormData());
+    return SendBeaconInternal(aUrl, &body, eBeaconTypeOther, aRv);
+  }
+
+  if (aData.Value().IsUSVString()) {
+    BodyExtractor<const nsAString> body(&aData.Value().GetAsUSVString());
+    return SendBeaconInternal(aUrl, &body, eBeaconTypeOther, aRv);
+  }
+
+  if (aData.Value().IsURLSearchParams()) {
+    BodyExtractor<nsIXHRSendable> body(&aData.Value().GetAsURLSearchParams());
+    return SendBeaconInternal(aUrl, &body, eBeaconTypeOther, aRv);
+  }
+
+  MOZ_CRASH("Invalid data type.");
+  return false;
+}
+
+bool
+Navigator::SendBeaconInternal(const nsAString& aUrl,
+                              BodyExtractorBase* aBody,
+                              BeaconType aType,
+                              ErrorResult& aRv)
 {
   if (!mWindow) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
@@ -887,9 +928,9 @@ Navigator::SendBeacon(const nsAString& aUrl,
   nsLoadFlags loadFlags = nsIRequest::LOAD_NORMAL;
 
   // No need to use CORS for sendBeacon unless it's a BLOB
-  nsSecurityFlags securityFlags = (!aData.IsNull() && aData.Value().IsBlob())
-   ? nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS
-   : nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS;
+  nsSecurityFlags securityFlags = aType == eBeaconTypeBlob
+    ? nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS
+    : nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS;
   securityFlags |= nsILoadInfo::SEC_COOKIES_INCLUDE;
 
   nsCOMPtr<nsIChannel> channel;
@@ -915,68 +956,22 @@ Navigator::SendBeacon(const nsAString& aUrl,
   }
   httpChannel->SetReferrer(documentURI);
 
-  nsCString mimeType;
-  if (!aData.IsNull()) {
-    nsCOMPtr<nsIInputStream> in;
+  nsCOMPtr<nsIInputStream> in;
+  nsAutoCString contentTypeWithCharset;
+  nsAutoCString charset;
+  uint64_t length = 0;
 
-    if (aData.Value().IsString()) {
-      nsCString stringData = NS_ConvertUTF16toUTF8(aData.Value().GetAsString());
-      nsCOMPtr<nsIStringInputStream> strStream = do_CreateInstance(NS_STRINGINPUTSTREAM_CONTRACTID, &rv);
-      if (NS_FAILED(rv)) {
-        aRv.Throw(NS_ERROR_FAILURE);
-        return false;
-      }
-      rv = strStream->SetData(stringData.BeginReading(), stringData.Length());
-      if (NS_FAILED(rv)) {
-        aRv.Throw(NS_ERROR_FAILURE);
-        return false;
-      }
-      mimeType.AssignLiteral("text/plain;charset=UTF-8");
-      in = strStream;
-
-    } else if (aData.Value().IsArrayBufferView()) {
-
-      nsCOMPtr<nsIStringInputStream> strStream = do_CreateInstance(NS_STRINGINPUTSTREAM_CONTRACTID, &rv);
-      if (NS_FAILED(rv)) {
-        aRv.Throw(NS_ERROR_FAILURE);
-        return false;
-      }
-
-      const ArrayBufferView& view = aData.Value().GetAsArrayBufferView();
-      view.ComputeLengthAndData();
-      rv = strStream->SetData(reinterpret_cast<char*>(view.Data()),
-                              view.Length());
-
-      if (NS_FAILED(rv)) {
-        aRv.Throw(NS_ERROR_FAILURE);
-        return false;
-      }
-      mimeType.AssignLiteral("application/octet-stream");
-      in = strStream;
-
-    } else if (aData.Value().IsBlob()) {
-      Blob& blob = aData.Value().GetAsBlob();
-      blob.GetInternalStream(getter_AddRefs(in), aRv);
-      if (NS_WARN_IF(aRv.Failed())) {
-        return false;
-      }
-
-      nsAutoString type;
-      blob.GetType(type);
-      mimeType = NS_ConvertUTF16toUTF8(type);
-
-    } else if (aData.Value().IsFormData()) {
-      FormData& form = aData.Value().GetAsFormData();
-      uint64_t len;
-      nsAutoCString charset;
-      form.GetSendInfo(getter_AddRefs(in),
-                       &len,
-                       mimeType,
-                       charset);
-    } else {
-      MOZ_ASSERT(false, "switch statements not in sync");
-      aRv.Throw(NS_ERROR_FAILURE);
+  if (aBody) {
+    aRv = aBody->GetAsStream(getter_AddRefs(in), &length,
+                             contentTypeWithCharset, charset);
+    if (NS_WARN_IF(aRv.Failed())) {
       return false;
+    }
+
+    if (aType == eBeaconTypeArrayBuffer) {
+      MOZ_ASSERT(contentTypeWithCharset.IsEmpty());
+      MOZ_ASSERT(charset.IsEmpty());
+      contentTypeWithCharset.Assign("application/octet-stream");
     }
 
     nsCOMPtr<nsIUploadChannel2> uploadChannel = do_QueryInterface(channel);
@@ -984,7 +979,7 @@ Navigator::SendBeacon(const nsAString& aUrl,
       aRv.Throw(NS_ERROR_FAILURE);
       return false;
     }
-    uploadChannel->ExplicitSetUploadStream(in, mimeType, -1,
+    uploadChannel->ExplicitSetUploadStream(in, contentTypeWithCharset, length,
                                            NS_LITERAL_CSTRING("POST"),
                                            false);
   } else {
@@ -1510,131 +1505,14 @@ Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow, nsIURI* aURI,
   return siteSpecificUA->GetUserAgentForURIAndWindow(aURI, aWindow, aUserAgent);
 }
 
-#ifdef MOZ_EME
-static nsCString
-ToCString(const nsString& aString)
+Clipboard*
+Navigator::Clipboard()
 {
-  nsCString str("'");
-  str.Append(NS_ConvertUTF16toUTF8(aString));
-  str.AppendLiteral("'");
-  return str;
-}
-
-static nsCString
-ToCString(const MediaKeysRequirement aValue)
-{
-  nsCString str("'");
-  str.Append(nsDependentCString(MediaKeysRequirementValues::strings[static_cast<uint32_t>(aValue)].value));
-  str.AppendLiteral("'");
-  return str;
-}
-
-static nsCString
-ToCString(const MediaKeySystemMediaCapability& aValue)
-{
-  nsCString str;
-  str.AppendLiteral("{contentType=");
-  str.Append(ToCString(aValue.mContentType));
-  str.AppendLiteral(", robustness=");
-  str.Append(ToCString(aValue.mRobustness));
-  str.AppendLiteral("}");
-  return str;
-}
-
-template<class Type>
-static nsCString
-ToCString(const Sequence<Type>& aSequence)
-{
-  nsCString str;
-  str.AppendLiteral("[");
-  for (size_t i = 0; i < aSequence.Length(); i++) {
-    if (i != 0) {
-      str.AppendLiteral(",");
-    }
-    str.Append(ToCString(aSequence[i]));
+  if (!mClipboard) {
+    mClipboard = new dom::Clipboard(GetWindow());
   }
-  str.AppendLiteral("]");
-  return str;
+  return mClipboard;
 }
-
-template<class Type>
-static nsCString
-ToCString(const Optional<Sequence<Type>>& aOptional)
-{
-  nsCString str;
-  if (aOptional.WasPassed()) {
-    str.Append(ToCString(aOptional.Value()));
-  } else {
-    str.AppendLiteral("[]");
-  }
-  return str;
-}
-
-static nsCString
-ToCString(const MediaKeySystemConfiguration& aConfig)
-{
-  nsCString str;
-  str.AppendLiteral("{label=");
-  str.Append(ToCString(aConfig.mLabel));
-
-  str.AppendLiteral(", initDataTypes=");
-  str.Append(ToCString(aConfig.mInitDataTypes));
-
-  str.AppendLiteral(", audioCapabilities=");
-  str.Append(ToCString(aConfig.mAudioCapabilities));
-
-  str.AppendLiteral(", videoCapabilities=");
-  str.Append(ToCString(aConfig.mVideoCapabilities));
-
-  str.AppendLiteral(", distinctiveIdentifier=");
-  str.Append(ToCString(aConfig.mDistinctiveIdentifier));
-
-  str.AppendLiteral(", persistentState=");
-  str.Append(ToCString(aConfig.mPersistentState));
-
-  str.AppendLiteral(", sessionTypes=");
-  str.Append(ToCString(aConfig.mSessionTypes));
-
-  str.AppendLiteral("}");
-
-  return str;
-}
-
-static nsCString
-RequestKeySystemAccessLogString(const nsAString& aKeySystem,
-                                const Sequence<MediaKeySystemConfiguration>& aConfigs)
-{
-  nsCString str;
-  str.AppendPrintf("Navigator::RequestMediaKeySystemAccess(keySystem='%s' options=",
-                   NS_ConvertUTF16toUTF8(aKeySystem).get());
-  str.Append(ToCString(aConfigs));
-  str.AppendLiteral(")");
-  return str;
-}
-
-already_AddRefed<Promise>
-Navigator::RequestMediaKeySystemAccess(const nsAString& aKeySystem,
-                                       const Sequence<MediaKeySystemConfiguration>& aConfigs,
-                                       ErrorResult& aRv)
-{
-  EME_LOG("%s", RequestKeySystemAccessLogString(aKeySystem, aConfigs).get());
-
-  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
-  RefPtr<DetailedPromise> promise =
-    DetailedPromise::Create(go, aRv,
-      NS_LITERAL_CSTRING("navigator.requestMediaKeySystemAccess"));
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
-  if (!mMediaKeySystemAccessManager) {
-    mMediaKeySystemAccessManager = new MediaKeySystemAccessManager(mWindow);
-  }
-
-  mMediaKeySystemAccessManager->Request(promise, aKeySystem, aConfigs);
-  return promise.forget();
-}
-#endif
 
 } // namespace dom
 } // namespace mozilla

@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "TypedObjectConstants.h"
-
 function ViewedArrayBufferIfReified(tarray) {
     assert(IsTypedArray(tarray), "non-typed array asked for its buffer");
 
@@ -879,7 +877,7 @@ function SetFromNonTypedArray(target, array, targetOffset, targetLength, targetB
     // Steps 12-15, 21, 23-24.
     while (targetOffset < limitOffset) {
         // Steps 24a-c.
-        var kNumber = ToNumber(src[k]);
+        var kNumber = ToNumeric(src[k]);
 
         // Step 24d.  This explicit check will be unnecessary when we implement
         // throw-on-getting/setting-element-in-detached-buffer semantics.
@@ -1096,6 +1094,30 @@ function TypedArrayCompare(x, y) {
 
     // Steps 5, 10.
     return Number_isNaN(y) ? -1 : 0;
+}
+
+// https://tc39.github.io/proposal-bigint/#sec-%typedarray%.prototype.sort
+// TypedArray SortCompare specialization for BigInt values.
+function TypedArrayCompareBigInt(x, y) {
+    // Step 1.
+    // eslint-disable-next-line valid-typeof
+    assert(typeof x === "bigint" && typeof y === "bigint",
+           "x and y are not BigInts.");
+
+    // Step 2 (Implemented in TypedArraySort).
+
+    // Step 6.
+    if (x < y)
+        return -1;
+
+    // Step 7.
+    if (x > y)
+        return 1;
+
+    // Steps 3-5, 8-9 (Not applicable when sorting BigInt values).
+
+    // Step 10.
+    return 0;
 }
 
 // TypedArray SortCompare specialization for integer values.
@@ -1345,6 +1367,91 @@ function TypedArrayAt(index) {
 
     // Step 8.
     return obj[k];
+}
+
+// https://github.com/tc39/proposal-array-find-from-last
+// %TypedArray%.prototype.findLast ( predicate, thisArg )
+function TypedArrayFindLast(predicate/*, thisArg*/) {
+    // Step 1.
+    var O = this;
+
+    // Step 2.
+    var isTypedArray = IsTypedArrayEnsuringArrayBuffer(O);
+
+    // If we got here, `this` is either a typed array or a wrapper for one.
+
+    // Step 3.
+    var len;
+    if (isTypedArray) {
+        len = TypedArrayLength(O);
+    } else {
+        len = callFunction(CallTypedArrayMethodIfWrapped, O, "TypedArrayLengthMethod");
+    }
+
+    // Step 4.
+    if (arguments.length === 0) {
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, "%TypedArray%.prototype.findLast");
+    }
+    if (!IsCallable(predicate)) {
+        ThrowTypeError(JSMSG_NOT_FUNCTION, DecompileArg(0, predicate));
+    }
+
+    var thisArg = arguments.length > 1 ? arguments[1] : void 0;
+
+    // Steps 5-6.
+    for (var k = len - 1; k >= 0; k--) {
+        // Steps 6.a-b.
+        var kValue = O[k];
+
+        // Steps 6.c-d.
+        if (callContentFunction(predicate, thisArg, kValue, k, O)) {
+            return kValue;
+        }
+    }
+
+    // Step 7.
+    return undefined;
+}
+
+// https://github.com/tc39/proposal-array-find-from-last
+// %TypedArray%.prototype.findLastIndex ( predicate, thisArg )
+function TypedArrayFindLastIndex(predicate/*, thisArg*/) {
+    // Step 1.
+    var O = this;
+
+    // Step 2.
+    var isTypedArray = IsTypedArrayEnsuringArrayBuffer(O);
+
+    // If we got here, `this` is either a typed array or a wrapper for one.
+
+    // Step 3.
+    var len;
+    if (isTypedArray) {
+        len = TypedArrayLength(O);
+    } else {
+        len = callFunction(CallTypedArrayMethodIfWrapped, O, "TypedArrayLengthMethod");
+    }
+
+    // Step 4.
+    if (arguments.length === 0) {
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, "%TypedArray%.prototype.findLastIndex");
+    }
+    if (!IsCallable(predicate)) {
+        ThrowTypeError(JSMSG_NOT_FUNCTION, DecompileArg(0, predicate));
+    }
+
+    var thisArg = arguments.length > 1 ? arguments[1] : void 0;
+
+    // Steps 5-6.
+    for (var k = len - 1; k >= 0; k--) {
+        // Steps 6.a-f.
+        if (callContentFunction(predicate, thisArg, O[k], k, O)) {
+            return k;
+        }
+    }
+
+    // Step 7.
+    return -1;
 }
 
 // ES6 draft rev30 (2014/12/24) 22.2.3.30 %TypedArray%.prototype.values()
@@ -1672,7 +1779,7 @@ function ArrayBufferSlice(start, end) {
         ThrowTypeError(JSMSG_TYPED_ARRAY_DETACHED);
 
     // Steps 19-21.
-    ArrayBufferCopyData(new_, O, first | 0, newLen | 0, isWrapped);
+    ArrayBufferCopyData(new_, 0, O, first | 0, newLen | 0, isWrapped);
 
     // Step 22.
     return new_;
@@ -1754,7 +1861,7 @@ function SharedArrayBufferSlice(start, end) {
         ThrowTypeError(JSMSG_SHORT_SHARED_ARRAY_BUFFER_RETURNED, newLen, actualLen);
 
     // Steps 16-18.
-    SharedArrayBufferCopyData(new_, O, first | 0, newLen | 0, isWrapped);
+    SharedArrayBufferCopyData(new_, 0, O, first | 0, newLen | 0, isWrapped);
 
     // Step 19.
     return new_;

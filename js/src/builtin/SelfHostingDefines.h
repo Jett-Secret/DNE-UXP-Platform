@@ -52,11 +52,6 @@
 // stored.
 #define LAZY_FUNCTION_NAME_SLOT 0
 
-// The extended slot which contains a boolean value that indicates whether
-// that the canonical name of the self-hosted builtins is set in self-hosted
-// global. This slot is used only in debug build.
-#define HAS_SELFHOSTED_CANONICAL_NAME_SLOT 0
-
 // Stores the length for bound functions, so the .length property doesn't need
 // to be resolved eagerly.
 #define BOUND_FUN_LENGTH_SLOT 1
@@ -96,11 +91,13 @@
 #define REGEXP_STRING_ITERATOR_FLAGS_SLOT 2
 #define REGEXP_STRING_ITERATOR_DONE_SLOT 3
 
+#define INTL_INTERNALS_OBJECT_SLOT 0
+
 #define MODULE_OBJECT_ENVIRONMENT_SLOT        1
 #define MODULE_OBJECT_STATUS_SLOT             3
 #define MODULE_OBJECT_EVALUATION_ERROR_SLOT   4
-#define MODULE_OBJECT_DFS_INDEX_SLOT          15
-#define MODULE_OBJECT_DFS_ANCESTOR_INDEX_SLOT 16
+#define MODULE_OBJECT_DFS_INDEX_SLOT          16
+#define MODULE_OBJECT_DFS_ANCESTOR_INDEX_SLOT 17
 
 #define MODULE_STATUS_UNINSTANTIATED  0
 #define MODULE_STATUS_INSTANTIATING   1

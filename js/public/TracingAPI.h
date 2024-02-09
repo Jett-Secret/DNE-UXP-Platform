@@ -141,6 +141,7 @@ class JS_PUBLIC_API(CallbackTracer) : public JSTracer
     virtual void onObjectEdge(JSObject** objp) { onChild(JS::GCCellPtr(*objp)); }
     virtual void onStringEdge(JSString** strp) { onChild(JS::GCCellPtr(*strp)); }
     virtual void onSymbolEdge(JS::Symbol** symp) { onChild(JS::GCCellPtr(*symp)); }
+    virtual void onBigIntEdge(JS::BigInt** bip) { onChild(JS::GCCellPtr(*bip)); }
     virtual void onScriptEdge(JSScript** scriptp) { onChild(JS::GCCellPtr(*scriptp)); }
     virtual void onShapeEdge(js::Shape** shapep) {
         onChild(JS::GCCellPtr(*shapep, JS::TraceKind::Shape));
@@ -159,6 +160,9 @@ class JS_PUBLIC_API(CallbackTracer) : public JSTracer
     }
     virtual void onScopeEdge(js::Scope** scopep) {
         onChild(JS::GCCellPtr(*scopep, JS::TraceKind::Scope));
+    }
+    virtual void onRegExpSharedEdge(js::RegExpShared** sharedp) {
+        onChild(JS::GCCellPtr(*sharedp, JS::TraceKind::RegExpShared));
     }
 
     // Override this method to receive notification when a node in the GC
@@ -223,6 +227,7 @@ class JS_PUBLIC_API(CallbackTracer) : public JSTracer
     void dispatchToOnEdge(JSObject** objp) { onObjectEdge(objp); }
     void dispatchToOnEdge(JSString** strp) { onStringEdge(strp); }
     void dispatchToOnEdge(JS::Symbol** symp) { onSymbolEdge(symp); }
+    void dispatchToOnEdge(JS::BigInt** bip) { onBigIntEdge(bip); }
     void dispatchToOnEdge(JSScript** scriptp) { onScriptEdge(scriptp); }
     void dispatchToOnEdge(js::Shape** shapep) { onShapeEdge(shapep); }
     void dispatchToOnEdge(js::ObjectGroup** groupp) { onObjectGroupEdge(groupp); }
@@ -230,6 +235,7 @@ class JS_PUBLIC_API(CallbackTracer) : public JSTracer
     void dispatchToOnEdge(js::jit::JitCode** codep) { onJitCodeEdge(codep); }
     void dispatchToOnEdge(js::LazyScript** lazyp) { onLazyScriptEdge(lazyp); }
     void dispatchToOnEdge(js::Scope** scopep) { onScopeEdge(scopep); }
+    void dispatchToOnEdge(js::RegExpShared** sharedp) { onRegExpSharedEdge(sharedp); }
 
   private:
     friend class AutoTracingName;

@@ -277,6 +277,8 @@ class MOZ_NON_MEMMOVABLE Heap : public js::HeapBase<T, Heap<T>>
 
     T* unsafeGet() { return &ptr; }
 
+    void unsafeSet(const T& newPtr) { ptr = newPtr; }
+
     void set(const T& newPtr) {
         T tmp = ptr;
         ptr = newPtr;
@@ -1272,7 +1274,7 @@ class MutableWrappedPtrOperations<UniquePtr<T, D>, Container>
     UniquePtr<T, D>& uniquePtr() { return static_cast<Container*>(this)->get(); }
 
   public:
-    MOZ_MUST_USE typename UniquePtr<T, D>::Pointer release() { return uniquePtr().release(); }
+    [[nodiscard]] typename UniquePtr<T, D>::Pointer release() { return uniquePtr().release(); }
     void reset(T* ptr = T()) { uniquePtr().reset(ptr); }
 };
 

@@ -1322,14 +1322,37 @@ BaselineCompiler::emit_JSOP_POS()
     // Keep top stack value in R0.
     frame.popRegsAndSync(1);
 
-    // Inline path for int32 and double.
+    // Inline path for int32 and double; otherwise call VM.
     Label done;
     masm.branchTestNumber(Assembler::Equal, R0, &done);
 
-    // Call IC.
-    ICToNumber_Fallback::Compiler stubCompiler(cx);
-    if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
+    prepareVMCall();
+    pushArg(R0);
+    if (!callVM(ToNumberInfo)) {
+      return false;
+    }
+
+    masm.bind(&done);
+    frame.push(R0);
+    return true;
+}
+
+
+bool
+BaselineCompiler::emit_JSOP_TONUMERIC()
+{
+    // Keep top stack value in R0.
+    frame.popRegsAndSync(1);
+
+    // Inline path for int32 and double; otherwise call VM.
+    Label done;
+    masm.branchTestNumber(Assembler::Equal, R0, &done);
+
+    prepareVMCall();
+    pushArg(R0);
+    if (!callVM(ToNumericInfo)) {
         return false;
+    }
 
     masm.bind(&done);
     frame.push(R0);
@@ -1615,6 +1638,13 @@ BaselineCompiler::emit_JSOP_UINT24()
 
 bool
 BaselineCompiler::emit_JSOP_DOUBLE()
+{
+    frame.push(script->getConst(GET_UINT32_INDEX(pc)));
+    return true;
+}
+
+bool
+BaselineCompiler::emit_JSOP_BIGINT()
 {
     frame.push(script->getConst(GET_UINT32_INDEX(pc)));
     return true;
@@ -1930,6 +1960,18 @@ bool
 BaselineCompiler::emit_JSOP_NEG()
 {
     return emitUnaryArith();
+}
+
+bool
+BaselineCompiler::emit_JSOP_INC()
+{
+  return emitUnaryArith();
+}
+
+bool
+BaselineCompiler::emit_JSOP_DEC()
+{
+  return emitUnaryArith();
 }
 
 bool
@@ -4557,20 +4599,20 @@ BaselineCompiler::emit_JSOP_RESUME()
         Register initLength = regs.takeAny();
         masm.loadPtr(Address(scratch2, NativeObject::offsetOfElements()), scratch2);
         masm.load32(Address(scratch2, ObjectElements::offsetOfInitializedLength()), initLength);
+        masm.store32(Imm32(0), Address(scratch2, ObjectElements::offsetOfInitializedLength()));
 
         Label loop, loopDone;
         masm.bind(&loop);
         masm.branchTest32(Assembler::Zero, initLength, initLength, &loopDone);
         {
             masm.pushValue(Address(scratch2, 0));
+            masm.patchableCallPreBarrier(exprStackSlot, MIRType::Value);
             masm.addPtr(Imm32(sizeof(Value)), scratch2);
             masm.sub32(Imm32(1), initLength);
             masm.jump(&loop);
         }
         masm.bind(&loopDone);
 
-        masm.patchableCallPreBarrier(exprStackSlot, MIRType::Value);
-        masm.storeValue(NullValue(), exprStackSlot);
         regs.add(initLength);
     }
 
@@ -4692,5 +4734,54 @@ BaselineCompiler::emit_JSOP_JUMPTARGET()
     PCCounts* counts = script->maybeGetPCCounts(pc);
     uint64_t* counterAddr = &counts->numExec();
     masm.inc64(AbsoluteAddress(counterAddr));
+    return true;
+}
+
+typedef JSObject* (*GetOrCreateModuleMetaObjectFn)(JSContext*, HandleObject);
+static const VMFunction GetOrCreateModuleMetaObjectInfo =
+    FunctionInfo<GetOrCreateModuleMetaObjectFn>(js::GetOrCreateModuleMetaObject,
+                                                "GetOrCreateModuleMetaObject");
+
+bool
+BaselineCompiler::emit_JSOP_IMPORTMETA()
+{
+    RootedModuleObject module(cx, GetModuleObjectForScript(script));
+    MOZ_ASSERT(module);
+
+    frame.syncStack(0);
+
+    prepareVMCall();
+    pushArg(ImmGCPtr(module));
+    if (!callVM(GetOrCreateModuleMetaObjectInfo)) {
+        return false;
+    }
+
+    masm.tagValue(JSVAL_TYPE_OBJECT, ReturnReg, R0);
+    frame.push(R0);
+    return true;
+}
+
+typedef JSObject* (*StartDynamicModuleImportFn)(JSContext*, HandleValue, HandleValue);
+static const VMFunction StartDynamicModuleImportInfo =
+    FunctionInfo<StartDynamicModuleImportFn>(js::StartDynamicModuleImport,
+                                                "StartDynamicModuleImport");
+
+bool
+BaselineCompiler::emit_JSOP_DYNAMIC_IMPORT()
+{
+    RootedValue referencingPrivate(cx, FindScriptOrModulePrivateForScript(script));
+
+    // Put specifier value in R0.
+    frame.popRegsAndSync(1);
+
+    prepareVMCall();
+    pushArg(R0);
+    pushArg(referencingPrivate);
+    if (!callVM(StartDynamicModuleImportInfo)) {
+        return false;
+    }
+
+    masm.tagValue(JSVAL_TYPE_OBJECT, ReturnReg, R0);
+    frame.push(R0);
     return true;
 }

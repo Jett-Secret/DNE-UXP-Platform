@@ -419,7 +419,6 @@ CodeGeneratorX86::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
     AnyRegister out = ToAnyRegister(ins->output());
 
     Scalar::Type accessType = mir->accessType();
-    MOZ_ASSERT(!Scalar::isSimdType(accessType));
 
     OutOfLineLoadTypedArrayOutOfBounds* ool = nullptr;
     if (mir->needsBoundsCheck()) {
@@ -498,7 +497,6 @@ CodeGeneratorX86::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
     const LAllocation* value = ins->value();
 
     Scalar::Type accessType = mir->accessType();
-    MOZ_ASSERT(!Scalar::isSimdType(accessType));
     canonicalizeIfDeterministic(accessType, value);
 
     Operand dstAddr = ptr->isBogus()
@@ -1180,6 +1178,28 @@ CodeGeneratorX86::visitExtendInt32ToInt64(LExtendInt32ToInt64* lir)
         MOZ_ASSERT(output.high == edx);
         masm.cdq();
     }
+}
+
+void
+CodeGeneratorX86::visitSignExtendInt64(LSignExtendInt64* lir)
+{
+    Register64 input = ToRegister64(lir->getInt64Operand(0));
+    Register64 output = ToOutRegister64(lir);
+    MOZ_ASSERT(input.low == eax);
+    MOZ_ASSERT(output.low == eax);
+    MOZ_ASSERT(input.high == edx);
+    MOZ_ASSERT(output.high == edx);
+    switch (lir->mode()) {
+      case MSignExtendInt64::Byte:
+        masm.move8SignExtend(eax, eax);
+        break;
+      case MSignExtendInt64::Half:
+        masm.move16SignExtend(eax, eax);
+        break;
+      case MSignExtendInt64::Word:
+        break;
+    }
+    masm.cdq();
 }
 
 void

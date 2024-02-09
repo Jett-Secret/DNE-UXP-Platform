@@ -92,6 +92,8 @@ enum class InvalidEscapeType {
     Octal
 };
 
+enum class NameVisibility { Public, Private };
+
 class TokenStream;
 
 struct Token
@@ -185,7 +187,7 @@ struct Token
     // Mutators
 
     void setName(PropertyName* name) {
-        MOZ_ASSERT(type == TOK_NAME);
+        MOZ_ASSERT(type == TOK_NAME || type == TOK_PRIVATE_NAME);
         u.name = name;
     }
 
@@ -211,7 +213,7 @@ struct Token
     // Type-safe accessors
 
     PropertyName* name() const {
-        MOZ_ASSERT(type == TOK_NAME);
+        MOZ_ASSERT(type == TOK_NAME || type == TOK_PRIVATE_NAME);
         return u.name->JSAtom::asPropertyName(); // poor-man's type verification
     }
 
@@ -244,17 +246,14 @@ class CompileError : public JSErrorReport {
     void throwError(JSContext* cx);
 };
 
+extern TokenKind
+ReservedWordTokenKind(PropertyName* str);
+
 extern const char*
 ReservedWordToCharZ(PropertyName* str);
 
-extern MOZ_MUST_USE bool
-IsFutureReservedWord(JSLinearString* str);
-
-extern MOZ_MUST_USE bool
-IsReservedWordLiteral(JSLinearString* str);
-
-extern MOZ_MUST_USE bool
-IsStrictReservedWord(JSLinearString* str);
+extern const char*
+ReservedWordToCharZ(TokenKind tt);
 
 // Ideally, tokenizing would be entirely independent of context.  But the
 // strict mode flag, which is in SharedContext, affects tokenizing, and
@@ -329,7 +328,7 @@ class MOZ_STACK_CLASS TokenStream
 
     ~TokenStream();
 
-    MOZ_MUST_USE bool checkOptions();
+    [[nodiscard]] bool checkOptions();
 
     // Accessors.
     const Token& currentToken() const { return tokens[cursor]; }
@@ -347,12 +346,22 @@ class MOZ_STACK_CLASS TokenStream
 
   public:
     PropertyName* currentName() const {
-        if (isCurrentTokenType(TOK_NAME)) {
+        if (isCurrentTokenType(TOK_NAME) || isCurrentTokenType(TOK_PRIVATE_NAME)) {
             return currentToken().name();
         }
 
         MOZ_ASSERT(TokenKindIsPossibleIdentifierName(currentToken().type));
         return reservedWordToPropertyName(currentToken().type);
+    }
+
+    bool currentNameHasEscapes() const {
+        if (isCurrentTokenType(TOK_NAME) || isCurrentTokenType(TOK_PRIVATE_NAME)) {
+            TokenPos pos = currentToken().pos;
+            return (pos.end - pos.begin) != currentToken().name()->length();
+        }
+
+        MOZ_ASSERT(TokenKindIsPossibleIdentifierName(currentToken().type));
+        return false;
     }
 
     PropertyName* nextName() const {
@@ -402,7 +411,7 @@ class MOZ_STACK_CLASS TokenStream
     void errorAt(uint32_t offset, unsigned errorNumber, ...);
 
     // Warn at the current offset.
-    MOZ_MUST_USE bool warning(unsigned errorNumber, ...);
+    [[nodiscard]] bool warning(unsigned errorNumber, ...);
 
     static const uint32_t NoOffset = UINT32_MAX;
 
@@ -481,7 +490,7 @@ class MOZ_STACK_CLASS TokenStream
     }
 
     static JSAtom* atomize(ExclusiveContext* cx, CharBuffer& cb);
-    MOZ_MUST_USE bool putIdentInTokenbuf(const char16_t* identStart);
+    [[nodiscard]] bool putIdentInTokenbuf(const char16_t* identStart);
 
     struct Flags
     {
@@ -577,7 +586,7 @@ class MOZ_STACK_CLASS TokenStream
 
     // Advance to the next token.  If the token stream encountered an error,
     // return false.  Otherwise return true and store the token kind in |*ttp|.
-    MOZ_MUST_USE bool getToken(TokenKind* ttp, Modifier modifier = None) {
+    [[nodiscard]] bool getToken(TokenKind* ttp, Modifier modifier = None) {
         // Check for a pushed-back token resulting from mismatching lookahead.
         if (lookahead != 0) {
             MOZ_ASSERT(!flags.hadError);
@@ -600,7 +609,7 @@ class MOZ_STACK_CLASS TokenStream
         cursor = (cursor - 1) & ntokensMask;
     }
 
-    MOZ_MUST_USE bool peekToken(TokenKind* ttp, Modifier modifier = None) {
+    [[nodiscard]] bool peekToken(TokenKind* ttp, Modifier modifier = None) {
         if (lookahead > 0) {
             MOZ_ASSERT(!flags.hadError);
             verifyConsistentModifier(modifier, nextToken());
@@ -613,7 +622,7 @@ class MOZ_STACK_CLASS TokenStream
         return true;
     }
 
-    MOZ_MUST_USE bool peekTokenPos(TokenPos* posp, Modifier modifier = None) {
+    [[nodiscard]] bool peekTokenPos(TokenPos* posp, Modifier modifier = None) {
         if (lookahead == 0) {
             TokenKind tt;
             if (!getTokenInternal(&tt, modifier))
@@ -628,7 +637,7 @@ class MOZ_STACK_CLASS TokenStream
         return true;
     }
 
-    MOZ_MUST_USE bool peekOffset(uint32_t* offset, Modifier modifier = None) {
+    [[nodiscard]] bool peekOffset(uint32_t* offset, Modifier modifier = None) {
         TokenPos pos;
         if (!peekTokenPos(&pos, modifier))
             return false;
@@ -642,7 +651,7 @@ class MOZ_STACK_CLASS TokenStream
     // TOK_EOL is actually created, just a TOK_EOL TokenKind is returned, and
     // currentToken() shouldn't be consulted.  (This is the only place TOK_EOL
     // is produced.)
-    MOZ_ALWAYS_INLINE MOZ_MUST_USE bool
+    [[nodiscard]] MOZ_ALWAYS_INLINE bool
     peekTokenSameLine(TokenKind* ttp, Modifier modifier = None) {
         const Token& curr = currentToken();
 
@@ -683,7 +692,7 @@ class MOZ_STACK_CLASS TokenStream
     }
 
     // Get the next token from the stream if its kind is |tt|.
-    MOZ_MUST_USE bool matchToken(bool* matchedp, TokenKind tt, Modifier modifier = None) {
+    [[nodiscard]] bool matchToken(bool* matchedp, TokenKind tt, Modifier modifier = None) {
         TokenKind token;
         if (!getToken(&token, modifier))
             return false;
@@ -703,7 +712,7 @@ class MOZ_STACK_CLASS TokenStream
         MOZ_ALWAYS_TRUE(matched);
     }
 
-    MOZ_MUST_USE bool nextTokenEndsExpr(bool* endsExpr) {
+    [[nodiscard]] bool nextTokenEndsExpr(bool* endsExpr) {
         TokenKind tt;
         if (!peekToken(&tt))
             return false;
@@ -734,10 +743,10 @@ class MOZ_STACK_CLASS TokenStream
         Token lookaheadTokens[maxLookahead];
     };
 
-    MOZ_MUST_USE bool advance(size_t position);
+    [[nodiscard]] bool advance(size_t position);
     void tell(Position*);
     void seek(const Position& pos);
-    MOZ_MUST_USE bool seek(const Position& pos, const TokenStream& other);
+    [[nodiscard]] bool seek(const Position& pos, const TokenStream& other);
 #ifdef DEBUG
     inline bool debugHasNoLookahead() const {
         return lookahead == 0;
@@ -821,8 +830,8 @@ class MOZ_STACK_CLASS TokenStream
       public:
         SourceCoords(ExclusiveContext* cx, uint32_t ln);
 
-        MOZ_MUST_USE bool add(uint32_t lineNum, uint32_t lineStartOffset);
-        MOZ_MUST_USE bool fill(const SourceCoords& other);
+        [[nodiscard]] bool add(uint32_t lineNum, uint32_t lineStartOffset);
+        [[nodiscard]] bool fill(const SourceCoords& other);
 
         bool isOnThisLine(uint32_t offset, uint32_t lineNum, bool* onThisLine) const {
             uint32_t lineIndex = lineNumToIndex(lineNum);
@@ -961,9 +970,9 @@ class MOZ_STACK_CLASS TokenStream
         const char16_t* ptr;            // next char to get
     };
 
-    MOZ_MUST_USE bool getTokenInternal(TokenKind* ttp, Modifier modifier);
+    [[nodiscard]] bool getTokenInternal(TokenKind* ttp, Modifier modifier);
 
-    MOZ_MUST_USE bool getStringOrTemplateToken(int untilChar, Token** tp);
+    [[nodiscard]] bool getStringOrTemplateToken(int untilChar, Token** tp);
 
     int32_t getChar();
     int32_t getCharIgnoreEOL();
@@ -977,13 +986,13 @@ class MOZ_STACK_CLASS TokenStream
     bool matchTrailForLeadSurrogate(char16_t lead, char16_t* trail, uint32_t* codePoint);
     bool peekChars(int n, char16_t* cp);
 
-    MOZ_MUST_USE bool getDirectives(bool isMultiline, bool shouldWarnDeprecated);
-    MOZ_MUST_USE bool getDirective(bool isMultiline, bool shouldWarnDeprecated,
+    [[nodiscard]] bool getDirectives(bool isMultiline, bool shouldWarnDeprecated);
+    [[nodiscard]] bool getDirective(bool isMultiline, bool shouldWarnDeprecated,
                                    const char* directive, uint8_t directiveLength,
                                    const char* errorMsgPragma,
                                    UniquePtr<char16_t[], JS::FreePolicy>* destination);
-    MOZ_MUST_USE bool getDisplayURL(bool isMultiline, bool shouldWarnDeprecated);
-    MOZ_MUST_USE bool getSourceMappingURL(bool isMultiline, bool shouldWarnDeprecated);
+    [[nodiscard]] bool getDisplayURL(bool isMultiline, bool shouldWarnDeprecated);
+    [[nodiscard]] bool getSourceMappingURL(bool isMultiline, bool shouldWarnDeprecated);
 
     // |expect| cannot be an EOL char.
     bool matchChar(int32_t expect) {
@@ -997,7 +1006,7 @@ class MOZ_STACK_CLASS TokenStream
         MOZ_ASSERT(c == expect);
     }
 
-    MOZ_MUST_USE bool peekChar(int32_t* c) {
+    [[nodiscard]] bool peekChar(int32_t* c) {
         *c = getChar();
         ungetChar(*c);
         return true;

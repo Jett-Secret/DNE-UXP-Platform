@@ -1,6 +1,7 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
  *
  * Copyright 2016 Mozilla Foundation
+ * Copyright 2023 Moonchild Productions
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +27,7 @@ using namespace js::jit;
 using mozilla::IsNaN;
 
 template<size_t base>
-bool
+[[nodiscard]] bool
 js::wasm::RenderInBase(StringBuffer& sb, uint64_t num)
 {
     uint64_t n = num;
@@ -51,10 +52,10 @@ js::wasm::RenderInBase(StringBuffer& sb, uint64_t num)
 template bool js::wasm::RenderInBase<10>(StringBuffer& sb, uint64_t num);
 
 template<class T>
-bool
+[[nodiscard]] bool
 js::wasm::RenderNaN(StringBuffer& sb, Raw<T> num)
 {
-    typedef typename mozilla::SelectTrait<T> Traits;
+    typedef typename mozilla::FloatingPoint<T> Traits;
 
     MOZ_ASSERT(IsNaN(num.fp()));
 
@@ -72,5 +73,5 @@ js::wasm::RenderNaN(StringBuffer& sb, Raw<T> num)
            RenderInBase<16>(sb, payload);
 }
 
-template MOZ_MUST_USE bool js::wasm::RenderNaN(StringBuffer& b, Raw<float> num);
-template MOZ_MUST_USE bool js::wasm::RenderNaN(StringBuffer& b, Raw<double> num);
+template bool js::wasm::RenderNaN(StringBuffer& b, Raw<float> num);
+template bool js::wasm::RenderNaN(StringBuffer& b, Raw<double> num);

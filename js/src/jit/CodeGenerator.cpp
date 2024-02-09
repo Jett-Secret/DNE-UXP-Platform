@@ -163,7 +163,6 @@ CodeGenerator::CodeGenerator(MIRGenerator* gen, LIRGraph* graph, MacroAssembler*
   : CodeGeneratorSpecific(gen, graph, masm)
   , ionScriptLabels_(gen->alloc())
   , scriptCounts_(nullptr)
-  , simdRefreshTemplatesDuringLink_(0)
 {
 }
 
@@ -526,9 +525,11 @@ CodeGenerator::testValueTruthyKernel(const ValueOperand& value,
     bool mightBeString = valueMIR->mightBeType(MIRType::String);
     bool mightBeSymbol = valueMIR->mightBeType(MIRType::Symbol);
     bool mightBeDouble = valueMIR->mightBeType(MIRType::Double);
+    bool mightBeBigInt = valueMIR->mightBeType(MIRType::BigInt);
     int tagCount = int(mightBeUndefined) + int(mightBeNull) +
         int(mightBeBoolean) + int(mightBeInt32) + int(mightBeObject) +
-        int(mightBeString) + int(mightBeSymbol) + int(mightBeDouble);
+        int(mightBeString) + int(mightBeSymbol) + int(mightBeDouble) + 
+        int(mightBeBigInt);;
 
     MOZ_ASSERT_IF(!valueMIR->emptyResultTypeSet(), tagCount > 0);
 
@@ -615,6 +616,20 @@ CodeGenerator::testValueTruthyKernel(const ValueOperand& value,
             masm.jump(ifTruthy);
         // Else just fall through to truthiness.
         masm.bind(&notString);
+        --tagCount;
+    }
+
+    if (mightBeBigInt) {
+        MOZ_ASSERT(tagCount != 0);
+        Label notBigInt;
+        if (tagCount != 1) {
+            masm.branchTestBigInt(Assembler::NotEqual, tag, &notBigInt);
+        }
+        masm.branchTestBigIntTruthy(false, value, ifFalsy);
+        if (tagCount != 1) {
+            masm.jump(ifTruthy);
+        }
+        masm.bind(&notBigInt);
         --tagCount;
     }
 
@@ -954,8 +969,15 @@ CodeGenerator::visitValueToString(LValueToString* lir)
     }
 
     // Symbol
-    if (lir->mir()->input()->mightBeType(MIRType::Symbol))
+    if (lir->mir()->input()->mightBeType(MIRType::Symbol)) {
         masm.branchTestSymbol(Assembler::Equal, tag, ool->entry());
+    }
+
+    // BigInt
+    if (lir->mir()->input()->mightBeType(MIRType::BigInt)) {
+        // No fastpath currently implemented.
+        masm.branchTestBigInt(Assembler::Equal, tag, ool->entry());
+    }
 
 #ifdef DEBUG
     masm.assumeUnreachable("Unexpected type for MValueToString.");
@@ -2355,6 +2377,8 @@ CodeGenerator::visitUnarySharedStub(LUnarySharedStub* lir)
     switch (jsop) {
       case JSOP_BITNOT:
       case JSOP_NEG:
+      case JSOP_INC:
+      case JSOP_DEC:
         emitSharedStub(ICStub::Kind::UnaryArith_Fallback, lir);
         break;
       case JSOP_CALLPROP:
@@ -2400,6 +2424,31 @@ CodeGenerator::visitNullarySharedStub(LNullarySharedStub* lir)
       default:
         MOZ_CRASH("Unsupported jsop in shared stubs.");
     }
+}
+
+typedef JSObject* (*GetOrCreateModuleMetaObjectFn)(JSContext*, HandleObject);
+static const VMFunction GetOrCreateModuleMetaObjectInfo =
+    FunctionInfo<GetOrCreateModuleMetaObjectFn>(js::GetOrCreateModuleMetaObject,
+                                                "GetOrCreateModuleMetaObject");
+
+void
+CodeGenerator::visitModuleMetadata(LModuleMetadata* lir)
+{
+    pushArg(ImmPtr(lir->mir()->module()));
+    callVM(GetOrCreateModuleMetaObjectInfo, lir);
+}
+
+typedef JSObject* (*StartDynamicModuleImportFn)(JSContext*, HandleValue, HandleValue);
+static const VMFunction StartDynamicModuleImportInfo =
+    FunctionInfo<StartDynamicModuleImportFn>(js::StartDynamicModuleImport,
+                                                "StartDynamicModuleImport");
+
+void
+CodeGenerator::visitDynamicImport(LDynamicImport* lir)
+{
+    pushArg(ToValue(lir, LDynamicImport::SpecifierIndex));
+    pushArg(ToValue(lir, LDynamicImport::ReferencingPrivateIndex));
+    callVM(StartDynamicModuleImportInfo, lir);
 }
 
 typedef JSObject* (*LambdaFn)(JSContext*, HandleFunction, HandleObject);
@@ -3366,6 +3415,48 @@ CodeGenerator::visitLoadUnboxedExpando(LLoadUnboxedExpando* lir)
 }
 
 void
+CodeGenerator::visitToNumeric(LToNumeric* lir)
+{
+    ValueOperand operand = ToValue(lir, LToNumeric::Input);
+    ValueOperand output = ToOutValue(lir);
+    bool maybeInt32 = lir->mir()->mightBeType(MIRType::Int32);
+    bool maybeDouble = lir->mir()->mightBeType(MIRType::Double);
+    bool maybeNumber = maybeInt32 || maybeDouble;
+    bool maybeBigInt = lir->mir()->mightBeType(MIRType::BigInt);
+    int checks = int(maybeNumber) + int(maybeBigInt);
+
+    OutOfLineCode* ool = oolCallVM(ToNumericInfo, lir, ArgList(operand), StoreValueTo(output));
+
+    if (checks == 0) {
+        masm.jump(ool->entry());
+    } else {
+        Label done;
+        using Condition = Assembler::Condition;
+        constexpr Condition Equal = Assembler::Equal;
+        constexpr Condition NotEqual = Assembler::NotEqual;
+
+        if (maybeNumber) {
+            checks--;
+            Condition cond = checks ? Equal : NotEqual;
+            Label* target = checks ? &done : ool->entry();
+            masm.branchTestNumber(cond, operand, target);
+        }
+        if (maybeBigInt) {
+            checks--;
+            Condition cond = checks ? Equal : NotEqual;
+            Label* target = checks ? &done : ool->entry();
+            masm.branchTestBigInt(cond, operand, target);
+        }
+
+        MOZ_ASSERT(checks == 0);
+        masm.bind(&done);
+        masm.moveValue(operand, output);
+    }
+
+    masm.bind(ool->rejoin());
+}
+
+void
 CodeGenerator::visitTypeBarrierV(LTypeBarrierV* lir)
 {
     ValueOperand operand = ToValue(lir, LTypeBarrierV::Input);
@@ -3757,6 +3848,7 @@ CodeGenerator::visitCallNative(LCallNative* call)
         if (jitInfo && jitInfo->type() == JSJitInfo::IgnoresReturnValueNative)
             native = jitInfo->ignoresReturnValueMethod;
     }
+    ensureOsiSpace();
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, native));
 
     emitTracelogStopEvent(TraceLogger_Call);
@@ -3881,6 +3973,7 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
     masm.passABIArg(argObj);
     masm.passABIArg(argPrivate);
     masm.passABIArg(argArgs);
+    ensureOsiSpace();
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, target->jitInfo()->method));
 
     if (target->jitInfo()->isInfallible) {
@@ -4006,6 +4099,7 @@ CodeGenerator::visitCallGeneric(LCallGeneric* call)
 
     // Finally call the function in objreg.
     masm.bind(&makeCall);
+    ensureOsiSpace();
     uint32_t callOffset = masm.callJit(objreg);
     markSafepointAt(callOffset, call);
 
@@ -4104,6 +4198,7 @@ CodeGenerator::visitCallKnown(LCallKnown* call)
     masm.Push(Imm32(descriptor));
 
     // Finally call the function in objreg.
+    ensureOsiSpace();
     uint32_t callOffset = masm.callJit(objreg);
     markSafepointAt(callOffset, call);
 
@@ -4436,6 +4531,7 @@ CodeGenerator::emitApplyGeneric(T* apply)
         masm.bind(&rejoin);
 
         // Finally call the function in objreg, as assigned by one of the paths above.
+        ensureOsiSpace();
         uint32_t callOffset = masm.callJit(objreg);
         markSafepointAt(callOffset, apply);
 
@@ -4872,10 +4968,11 @@ CodeGenerator::branchIfInvalidated(Register temp, Label* invalidated)
 }
 
 void
-CodeGenerator::emitAssertObjectOrStringResult(Register input, MIRType type, const TemporaryTypeSet* typeset)
+CodeGenerator::emitAssertGCThingResult(Register input, MIRType type, const TemporaryTypeSet* typeset)
 {
     MOZ_ASSERT(type == MIRType::Object || type == MIRType::ObjectOrNull ||
-               type == MIRType::String || type == MIRType::Symbol);
+               type == MIRType::String || type == MIRType::Symbol ||
+               type == MIRType::BigInt);
 
     AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
     regs.take(input);
@@ -4929,6 +5026,9 @@ CodeGenerator::emitAssertObjectOrStringResult(Register input, MIRType type, cons
         break;
       case MIRType::Symbol:
         callee = JS_FUNC_TO_DATA_PTR(void*, AssertValidSymbolPtr);
+        break;
+      case MIRType::BigInt:
+        callee = JS_FUNC_TO_DATA_PTR(void*, AssertValidBigIntPtr);
         break;
       default:
         MOZ_CRASH();
@@ -4999,7 +5099,7 @@ CodeGenerator::emitAssertResultV(const ValueOperand input, const TemporaryTypeSe
 
 #ifdef DEBUG
 void
-CodeGenerator::emitObjectOrStringResultChecks(LInstruction* lir, MDefinition* mir)
+CodeGenerator::emitGCThingResultChecks(LInstruction* lir, MDefinition* mir)
 {
     if (lir->numDefs() == 0)
         return;
@@ -5007,7 +5107,7 @@ CodeGenerator::emitObjectOrStringResultChecks(LInstruction* lir, MDefinition* mi
     MOZ_ASSERT(lir->numDefs() == 1);
     Register output = ToRegister(lir->getDef(0));
 
-    emitAssertObjectOrStringResult(output, mir->type(), mir->resultTypeSet());
+    emitAssertGCThingResult(output, mir->type(), mir->resultTypeSet());
 }
 
 void
@@ -5039,7 +5139,8 @@ CodeGenerator::emitDebugResultChecks(LInstruction* ins)
       case MIRType::ObjectOrNull:
       case MIRType::String:
       case MIRType::Symbol:
-        emitObjectOrStringResultChecks(ins, mir);
+      case MIRType::BigInt:
+        emitGCThingResultChecks(ins, mir);
         break;
       case MIRType::Value:
         emitValueResultChecks(ins, mir);
@@ -5698,128 +5799,6 @@ CodeGenerator::visitNewTypedObject(LNewTypedObject* lir)
     masm.createGCObject(object, temp, templateObject, initialHeap, ool->entry());
 
     masm.bind(ool->rejoin());
-}
-
-void
-CodeGenerator::visitSimdBox(LSimdBox* lir)
-{
-    FloatRegister in = ToFloatRegister(lir->input());
-    Register object = ToRegister(lir->output());
-    Register temp = ToRegister(lir->temp());
-    InlineTypedObject* templateObject = lir->mir()->templateObject();
-    gc::InitialHeap initialHeap = lir->mir()->initialHeap();
-    MIRType type = lir->mir()->input()->type();
-
-    registerSimdTemplate(lir->mir()->simdType());
-
-    MOZ_ASSERT(lir->safepoint()->liveRegs().has(in), "Save the input register across oolCallVM");
-    OutOfLineCode* ool = oolCallVM(NewTypedObjectInfo, lir,
-                                   ArgList(ImmGCPtr(templateObject), Imm32(initialHeap)),
-                                   StoreRegisterTo(object));
-
-    masm.createGCObject(object, temp, templateObject, initialHeap, ool->entry());
-    masm.bind(ool->rejoin());
-
-    Address objectData(object, InlineTypedObject::offsetOfDataStart());
-    switch (type) {
-      case MIRType::Int8x16:
-      case MIRType::Int16x8:
-      case MIRType::Int32x4:
-      case MIRType::Bool8x16:
-      case MIRType::Bool16x8:
-      case MIRType::Bool32x4:
-        masm.storeUnalignedSimd128Int(in, objectData);
-        break;
-      case MIRType::Float32x4:
-        masm.storeUnalignedSimd128Float(in, objectData);
-        break;
-      default:
-        MOZ_CRASH("Unknown SIMD kind when generating code for SimdBox.");
-    }
-}
-
-void
-CodeGenerator::registerSimdTemplate(SimdType simdType)
-{
-    simdRefreshTemplatesDuringLink_ |= 1 << uint32_t(simdType);
-}
-
-void
-CodeGenerator::captureSimdTemplate(JSContext* cx)
-{
-    JitCompartment* jitCompartment = cx->compartment()->jitCompartment();
-    while (simdRefreshTemplatesDuringLink_) {
-        uint32_t typeIndex = mozilla::CountTrailingZeroes32(simdRefreshTemplatesDuringLink_);
-        simdRefreshTemplatesDuringLink_ ^= 1 << typeIndex;
-        SimdType type = SimdType(typeIndex);
-
-        // Note: the weak-reference on the template object should not have been
-        // garbage collected. It is either registered by IonBuilder, or verified
-        // before using it in the EagerSimdUnbox phase.
-        jitCompartment->registerSimdTemplateObjectFor(type);
-    }
-}
-
-void
-CodeGenerator::visitSimdUnbox(LSimdUnbox* lir)
-{
-    Register object = ToRegister(lir->input());
-    FloatRegister simd = ToFloatRegister(lir->output());
-    Register temp = ToRegister(lir->temp());
-    Label bail;
-
-    // obj->group()
-    masm.loadPtr(Address(object, JSObject::offsetOfGroup()), temp);
-
-    // Guard that the object has the same representation as the one produced for
-    // SIMD value-type.
-    Address clasp(temp, ObjectGroup::offsetOfClasp());
-    static_assert(!SimdTypeDescr::Opaque, "SIMD objects are transparent");
-    masm.branchPtr(Assembler::NotEqual, clasp, ImmPtr(&InlineTransparentTypedObject::class_),
-                   &bail);
-
-    // obj->type()->typeDescr()
-    // The previous class pointer comparison implies that the addendumKind is
-    // Addendum_TypeDescr.
-    masm.loadPtr(Address(temp, ObjectGroup::offsetOfAddendum()), temp);
-
-    // Check for the /Kind/ reserved slot of the TypeDescr.  This is an Int32
-    // Value which is equivalent to the object class check.
-    static_assert(JS_DESCR_SLOT_KIND < NativeObject::MAX_FIXED_SLOTS, "Load from fixed slots");
-    Address typeDescrKind(temp, NativeObject::getFixedSlotOffset(JS_DESCR_SLOT_KIND));
-    masm.assertTestInt32(Assembler::Equal, typeDescrKind,
-      "MOZ_ASSERT(obj->type()->typeDescr()->getReservedSlot(JS_DESCR_SLOT_KIND).isInt32())");
-    masm.branch32(Assembler::NotEqual, masm.ToPayload(typeDescrKind), Imm32(js::type::Simd), &bail);
-
-    SimdType type = lir->mir()->simdType();
-
-    // Check if the SimdTypeDescr /Type/ match the specialization of this
-    // MSimdUnbox instruction.
-    static_assert(JS_DESCR_SLOT_TYPE < NativeObject::MAX_FIXED_SLOTS, "Load from fixed slots");
-    Address typeDescrType(temp, NativeObject::getFixedSlotOffset(JS_DESCR_SLOT_TYPE));
-    masm.assertTestInt32(Assembler::Equal, typeDescrType,
-      "MOZ_ASSERT(obj->type()->typeDescr()->getReservedSlot(JS_DESCR_SLOT_TYPE).isInt32())");
-    masm.branch32(Assembler::NotEqual, masm.ToPayload(typeDescrType), Imm32(int32_t(type)), &bail);
-
-    // Load the value from the data of the InlineTypedObject.
-    Address objectData(object, InlineTypedObject::offsetOfDataStart());
-    switch (lir->mir()->type()) {
-      case MIRType::Int8x16:
-      case MIRType::Int16x8:
-      case MIRType::Int32x4:
-      case MIRType::Bool8x16:
-      case MIRType::Bool16x8:
-      case MIRType::Bool32x4:
-        masm.loadUnalignedSimd128Int(objectData, simd);
-        break;
-      case MIRType::Float32x4:
-        masm.loadUnalignedSimd128Float(objectData, simd);
-        break;
-      default:
-        MOZ_CRASH("The impossible happened!");
-    }
-
-    bailoutFrom(&bail, lir->snapshot());
 }
 
 typedef js::NamedLambdaObject* (*NewNamedLambdaObjectFn)(JSContext*, HandleFunction, gc::InitialHeap);
@@ -9490,12 +9469,6 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
     RootedScript script(cx, gen->info().script());
     OptimizationLevel optimizationLevel = gen->optimizationInfo().level();
 
-    // Capture the SIMD template objects which are used during the
-    // compilation. This iterates over the template objects, using read-barriers
-    // to let the GC know that the generated code relies on these template
-    // objects.
-    captureSimdTemplate(cx);
-
     // We finished the new IonScript. Invalidate the current active IonScript,
     // so we can replace it with this new (probably higher optimized) version.
     if (script->hasIonScript()) {
@@ -10276,7 +10249,7 @@ CodeGenerator::visitThrow(LThrow* lir)
     callVM(ThrowInfoCodeGen, lir);
 }
 
-typedef bool (*BitNotFn)(JSContext*, HandleValue, int* p);
+typedef bool (*BitNotFn)(JSContext*, MutableHandleValue, MutableHandleValue);
 static const VMFunction BitNotInfo = FunctionInfo<BitNotFn>(BitNot, "BitNot");
 
 void
@@ -10286,7 +10259,7 @@ CodeGenerator::visitBitNotV(LBitNotV* lir)
     callVM(BitNotInfo, lir);
 }
 
-typedef bool (*BitopFn)(JSContext*, HandleValue, HandleValue, int* p);
+typedef bool (*BitopFn)(JSContext*, MutableHandleValue, MutableHandleValue, MutableHandleValue);
 static const VMFunction BitAndInfo = FunctionInfo<BitopFn>(BitAnd, "BitAnd");
 static const VMFunction BitOrInfo = FunctionInfo<BitopFn>(BitOr, "BitOr");
 static const VMFunction BitXorInfo = FunctionInfo<BitopFn>(BitXor, "BitXor");
@@ -10356,9 +10329,11 @@ CodeGenerator::visitTypeOfV(LTypeOfV* lir)
     bool testNull = input->mightBeType(MIRType::Null);
     bool testString = input->mightBeType(MIRType::String);
     bool testSymbol = input->mightBeType(MIRType::Symbol);
+    bool testBigInt = input->mightBeType(MIRType::BigInt);
 
     unsigned numTests = unsigned(testObject) + unsigned(testNumber) + unsigned(testBoolean) +
-        unsigned(testUndefined) + unsigned(testNull) + unsigned(testString) + unsigned(testSymbol);
+        unsigned(testUndefined) + unsigned(testNull) + unsigned(testString) + unsigned(testSymbol) +
+        unsigned(testBigInt);
 
     MOZ_ASSERT_IF(!input->emptyResultTypeSet(), numTests > 0);
 
@@ -10451,6 +10426,19 @@ CodeGenerator::visitTypeOfV(LTypeOfV* lir)
         if (numTests > 1)
             masm.jump(&done);
         masm.bind(&notSymbol);
+        numTests--;
+    }
+
+    if (testBigInt) {
+        Label notBigInt;
+        if (numTests > 1) {
+            masm.branchTestBigInt(Assembler::NotEqual, tag, &notBigInt);
+        }
+        masm.movePtr(ImmGCPtr(names.bigint), output);
+        if (numTests > 1) {
+            masm.jump(&done);
+        }
+        masm.bind(&notBigInt);
         numTests--;
     }
 
@@ -10748,7 +10736,6 @@ CodeGenerator::visitLoadUnboxedScalar(LLoadUnboxedScalar* lir)
     const MLoadUnboxedScalar* mir = lir->mir();
 
     Scalar::Type readType = mir->readType();
-    unsigned numElems = mir->numElems();
 
     int width = Scalar::byteSize(mir->storageType());
     bool canonicalizeDouble = mir->canonicalizeDoubles();
@@ -10756,11 +10743,11 @@ CodeGenerator::visitLoadUnboxedScalar(LLoadUnboxedScalar* lir)
     Label fail;
     if (lir->index()->isConstant()) {
         Address source(elements, ToInt32(lir->index()) * width + mir->offsetAdjustment());
-        masm.loadFromTypedArray(readType, source, out, temp, &fail, canonicalizeDouble, numElems);
+        masm.loadFromTypedArray(readType, source, out, temp, &fail, canonicalizeDouble);
     } else {
         BaseIndex source(elements, ToRegister(lir->index()), ScaleFromElemWidth(width),
                          mir->offsetAdjustment());
-        masm.loadFromTypedArray(readType, source, out, temp, &fail, canonicalizeDouble, numElems);
+        masm.loadFromTypedArray(readType, source, out, temp, &fail, canonicalizeDouble);
     }
 
     if (fail.used())
@@ -10811,13 +10798,12 @@ CodeGenerator::visitLoadTypedArrayElementHole(LLoadTypedArrayElementHole* lir)
 template <typename T>
 static inline void
 StoreToTypedArray(MacroAssembler& masm, Scalar::Type writeType, const LAllocation* value,
-                  const T& dest, unsigned numElems = 0)
+                  const T& dest)
 {
-    if (Scalar::isSimdType(writeType) ||
-        writeType == Scalar::Float32 ||
+    if (writeType == Scalar::Float32 ||
         writeType == Scalar::Float64)
     {
-        masm.storeToTypedFloatArray(writeType, ToFloatRegister(value), dest, numElems);
+        masm.storeToTypedFloatArray(writeType, ToFloatRegister(value), dest);
     } else {
         if (value->isConstant())
             masm.storeToTypedIntArray(writeType, Imm32(ToInt32(value)), dest);
@@ -10835,17 +10821,16 @@ CodeGenerator::visitStoreUnboxedScalar(LStoreUnboxedScalar* lir)
     const MStoreUnboxedScalar* mir = lir->mir();
 
     Scalar::Type writeType = mir->writeType();
-    unsigned numElems = mir->numElems();
 
     int width = Scalar::byteSize(mir->storageType());
 
     if (lir->index()->isConstant()) {
         Address dest(elements, ToInt32(lir->index()) * width + mir->offsetAdjustment());
-        StoreToTypedArray(masm, writeType, value, dest, numElems);
+        StoreToTypedArray(masm, writeType, value, dest);
     } else {
         BaseIndex dest(elements, ToRegister(lir->index()), ScaleFromElemWidth(width),
                        mir->offsetAdjustment());
-        StoreToTypedArray(masm, writeType, value, dest, numElems);
+        StoreToTypedArray(masm, writeType, value, dest);
     }
 }
 
@@ -11244,6 +11229,7 @@ CodeGenerator::visitGetDOMProperty(LGetDOMProperty* ins)
     masm.passABIArg(ObjectReg);
     masm.passABIArg(PrivateReg);
     masm.passABIArg(ValueReg);
+    ensureOsiSpace();
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ins->mir()->fun()));
 
     if (ins->mir()->isInfallible()) {
@@ -11763,7 +11749,7 @@ CodeGenerator::visitAssertResultT(LAssertResultT* ins)
     Register input = ToRegister(ins->input());
     MDefinition* mir = ins->mirRaw();
 
-    emitAssertObjectOrStringResult(input, mir->type(), mir->resultTypeSet());
+    emitAssertGCThingResult(input, mir->type(), mir->resultTypeSet());
 }
 
 void
@@ -12131,16 +12117,16 @@ CodeGenerator::visitRandom(LRandom* ins)
 }
 
 void
-CodeGenerator::visitSignExtend(LSignExtend* ins)
+CodeGenerator::visitSignExtendInt32(LSignExtendInt32* ins)
 {
     Register input = ToRegister(ins->input());
     Register output = ToRegister(ins->output());
 
     switch (ins->mode()) {
-      case MSignExtend::Byte:
+      case MSignExtendInt32::Byte:
         masm.move8SignExtend(input, output);
         break;
-      case MSignExtend::Half:
+      case MSignExtendInt32::Half:
         masm.move16SignExtend(input, output);
         break;
     }

@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -26,7 +25,9 @@ H264Converter::H264Converter(PlatformDecoderModule* aPDM,
   , mTaskQueue(aParams.mTaskQueue)
   , mCallback(aParams.mCallback)
   , mDecoder(nullptr)
+#ifdef MOZ_GMP
   , mGMPCrashHelper(aParams.mCrashHelper)
+#endif
   , mNeedAVCC(aPDM->DecoderNeedsConversion(aParams.mConfig)
       == PlatformDecoderModule::ConversionRequired::kNeedAVCC)
   , mLastError(NS_OK)
@@ -202,8 +203,12 @@ H264Converter::CreateDecoder(DecoderDoctorDiagnostics* aDiagnostics)
     mCallback,
     aDiagnostics,
     mImageContainer,
+#ifdef MOZ_GMP
     mKnowsCompositor,
     mGMPCrashHelper
+#else
+    mKnowsCompositor
+#endif
   });
 
   if (!mDecoder) {

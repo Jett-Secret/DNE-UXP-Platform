@@ -1,12 +1,15 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "avcodec.h"
+#include "bsf.h"
+#include "bsf_internal.h"
 
+typedef struct FFTContext FFTContext;
 typedef struct H264PredContext H264PredContext;
+typedef struct RDFTContext RDFTContext;
 typedef struct VideoDSPContext VideoDSPContext;
 typedef struct VP8DSPContext VP8DSPContext;
 typedef struct VP9DSPContext VP9DSPContext;
@@ -822,21 +825,26 @@ AVCodecParser ff_vp3_parser;
 AVCodecParser ff_sipr_parser;
 AVCodecParser ff_xma_parser;
 
-AVBitStreamFilter ff_aac_adtstoasc_bsf;
-AVBitStreamFilter ff_chomp_bsf;
-AVBitStreamFilter ff_dump_extradata_bsf;
-AVBitStreamFilter ff_h264_mp4toannexb_bsf;
-AVBitStreamFilter ff_hevc_mp4toannexb_bsf;
-AVBitStreamFilter ff_imx_dump_header_bsf;
-AVBitStreamFilter ff_mjpeg2jpeg_bsf;
-AVBitStreamFilter ff_mjpega_dump_header_bsf;
-AVBitStreamFilter ff_mp3_header_decompress_bsf;
-AVBitStreamFilter ff_mpeg4_unpack_bframes_bsf;
-AVBitStreamFilter ff_mov2textsub_bsf;
-AVBitStreamFilter ff_noise_bsf;
-AVBitStreamFilter ff_remove_extradata_bsf;
-AVBitStreamFilter ff_text2movsub_bsf;
+FFBitStreamFilter ff_aac_adtstoasc_bsf;
+FFBitStreamFilter ff_chomp_bsf;
+FFBitStreamFilter ff_dump_extradata_bsf;
+FFBitStreamFilter ff_h264_mp4toannexb_bsf;
+FFBitStreamFilter ff_hevc_mp4toannexb_bsf;
+FFBitStreamFilter ff_imx_dump_header_bsf;
+FFBitStreamFilter ff_mjpeg2jpeg_bsf;
+FFBitStreamFilter ff_mjpega_dump_header_bsf;
+FFBitStreamFilter ff_mp3_header_decompress_bsf;
+FFBitStreamFilter ff_mpeg4_unpack_bframes_bsf;
+FFBitStreamFilter ff_mov2textsub_bsf;
+FFBitStreamFilter ff_noise_bsf;
+FFBitStreamFilter ff_remove_extradata_bsf;
+FFBitStreamFilter ff_text2movsub_bsf;
 
+void ff_fft_init_aarch64(FFTContext *s) {}
+void ff_fft_init_arm(FFTContext *s) {}
+void ff_fft_init_mips(FFTContext *s) {}
+void ff_fft_init_ppc(FFTContext *s) {}
+void ff_rdft_init_arm(RDFTContext *s) {}
 void ff_h264_pred_init_aarch64(H264PredContext *h, int codec_id,
                                const int bit_depth,
                                const int chroma_format_idc) {}

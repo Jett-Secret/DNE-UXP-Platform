@@ -54,8 +54,12 @@ using namespace mozilla;
 using namespace JS;
 using namespace xpc;
 
+using mozilla::dom::ConvertExceptionToPromise;
 using mozilla::dom::DestroyProtoAndIfaceCache;
 using mozilla::dom::IndexedDatabaseManager;
+using mozilla::dom::RequestOrUSVString;
+using mozilla::dom::RequestOrUSVStringArgument;
+using mozilla::dom::RootedDictionary;
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(SandboxPrivate)
 
@@ -316,6 +320,43 @@ SandboxCreateFetch(JSContext* cx, HandleObject obj)
         dom::RequestBinding::GetConstructorObject(cx) &&
         dom::ResponseBinding::GetConstructorObject(cx) &&
         dom::HeadersBinding::GetConstructorObject(cx);
+}
+
+static bool SandboxStructuredClone(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  if (!args.requireAtLeast(cx, "structuredClone", 1)) {
+    return false;
+  }
+
+  RootedDictionary<dom::StructuredSerializeOptions> options(cx);
+  if (!options.Init(cx, args.hasDefined(1) ? args[1] : JS::NullHandleValue,
+                    "Argument 2", false)) {
+    return false;
+  }
+
+  nsIGlobalObject* global = xpc::NativeGlobal(JS::CurrentGlobalOrNull(cx));
+  if (!global) {
+    JS_ReportErrorASCII(cx, "structuredClone: Missing global");
+    return false;
+  }
+
+  JS::Rooted<JS::Value> result(cx);
+  ErrorResult rv;
+  nsContentUtils::StructuredClone(cx, global, args[0], options, &result, rv);
+  if (rv.MaybeSetPendingException(cx)) {
+    return false;
+  }
+
+  args.rval().set(result);
+  return true;
+}
+
+static bool SandboxCreateStructuredClone(JSContext* cx, HandleObject obj) {
+  MOZ_ASSERT(JS_IsGlobalObject(obj));
+
+  return JS_DefineFunction(cx, obj, "structuredClone", SandboxStructuredClone,
+                           1, 0);
 }
 
 static bool
@@ -923,6 +964,8 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
 #endif
         } else if (!strcmp(name.ptr(), "fetch")) {
             fetch = true;
+        } else if (!strcmp(name.ptr(), "structuredClone")) {
+            structuredClone = true;
         } else if (!strcmp(name.ptr(), "caches")) {
             caches = true;
         } else if (!strcmp(name.ptr(), "FileReader")) {
@@ -996,6 +1039,9 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
 #endif
 
     if (fetch && !SandboxCreateFetch(cx, obj))
+        return false;
+
+    if (structuredClone && !SandboxCreateStructuredClone(cx, obj))
         return false;
 
     if (caches && !dom::cache::CacheStorage::DefineCaches(cx, obj))

@@ -23,6 +23,7 @@
 #include "js/TypeDecls.h"
 #include "js/Utility.h"
 #include "js/Vector.h"
+#include "vm/BigIntType.h"
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/GlobalObject.h"
@@ -202,7 +203,11 @@ Node::exposeToJS() const
         v.setString(as<JSString>());
     } else if (is<JS::Symbol>()) {
         v.setSymbol(as<JS::Symbol>());
-    } else {
+    }
+    else if (is<BigInt>()) {
+        v.setBigInt(as<BigInt>());
+    }
+    else {
         v.setUndefined();
     }
 
@@ -311,8 +316,10 @@ template JS::Zone* TracerConcrete<js::LazyScript>::zone() const;
 template JS::Zone* TracerConcrete<js::Shape>::zone() const;
 template JS::Zone* TracerConcrete<js::BaseShape>::zone() const;
 template JS::Zone* TracerConcrete<js::ObjectGroup>::zone() const;
+template JS::Zone* TracerConcrete<js::RegExpShared>::zone() const;
 template JS::Zone* TracerConcrete<js::Scope>::zone() const;
 template JS::Zone* TracerConcrete<JS::Symbol>::zone() const;
+template JS::Zone* TracerConcrete<BigInt>::zone() const;
 template JS::Zone* TracerConcrete<JSString>::zone() const;
 
 template<typename Referent>
@@ -333,8 +340,10 @@ template UniquePtr<EdgeRange> TracerConcrete<js::LazyScript>::edges(JSContext* c
 template UniquePtr<EdgeRange> TracerConcrete<js::Shape>::edges(JSContext* cx, bool wantNames) const;
 template UniquePtr<EdgeRange> TracerConcrete<js::BaseShape>::edges(JSContext* cx, bool wantNames) const;
 template UniquePtr<EdgeRange> TracerConcrete<js::ObjectGroup>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<js::RegExpShared>::edges(JSContext* cx, bool wantNames) const;
 template UniquePtr<EdgeRange> TracerConcrete<js::Scope>::edges(JSContext* cx, bool wantNames) const;
 template UniquePtr<EdgeRange> TracerConcrete<JS::Symbol>::edges(JSContext* cx, bool wantNames) const;
+template UniquePtr<EdgeRange> TracerConcrete<BigInt>::edges(JSContext* cx, bool wantNames) const;
 template UniquePtr<EdgeRange> TracerConcrete<JSString>::edges(JSContext* cx, bool wantNames) const;
 
 template<typename Referent>
@@ -390,6 +399,7 @@ Concrete<JSObject>::jsObjectConstructorName(JSContext* cx, UniqueTwoByteChars& o
 }
 
 const char16_t Concrete<JS::Symbol>::concreteTypeName[] = u"JS::Symbol";
+const char16_t Concrete<BigInt>::concreteTypeName[] = u"JS::BigInt";
 const char16_t Concrete<JSScript>::concreteTypeName[] = u"JSScript";
 const char16_t Concrete<js::LazyScript>::concreteTypeName[] = u"js::LazyScript";
 const char16_t Concrete<js::jit::JitCode>::concreteTypeName[] = u"js::jit::JitCode";
@@ -397,6 +407,7 @@ const char16_t Concrete<js::Shape>::concreteTypeName[] = u"js::Shape";
 const char16_t Concrete<js::BaseShape>::concreteTypeName[] = u"js::BaseShape";
 const char16_t Concrete<js::ObjectGroup>::concreteTypeName[] = u"js::ObjectGroup";
 const char16_t Concrete<js::Scope>::concreteTypeName[] = u"js::Scope";
+const char16_t Concrete<js::RegExpShared>::concreteTypeName[] = u"js::RegExpShared";
 
 namespace JS {
 namespace ubi {

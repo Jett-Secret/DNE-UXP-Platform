@@ -361,6 +361,9 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     void unboxSymbol(const ValueOperand& src, Register dest);
     void unboxSymbol(Register src, Register dest);
     void unboxSymbol(const Address& src, Register dest);
+    void unboxBigInt(const ValueOperand& operand, Register dest);
+    void unboxBigInt(Register src, Register dest);
+    void unboxBigInt(const Address& src, Register dest);
     void unboxObject(const ValueOperand& src, Register dest);
     void unboxObject(Register src, Register dest);
     void unboxObject(const Address& src, Register dest);
@@ -875,34 +878,6 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     void loadPtr(wasm::SymbolicAddress address, Register dest);
 
     void loadPrivate(const Address& address, Register dest);
-
-    void loadInt32x1(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x1(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x2(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x2(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x3(const Address& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x3(const BaseIndex& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x1(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x1(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x2(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x2(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x3(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x3(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
-    void loadAlignedSimd128Int(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeAlignedSimd128Int(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
-    void loadUnalignedSimd128Int(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadUnalignedSimd128Int(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeUnalignedSimd128Int(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
-    void storeUnalignedSimd128Int(FloatRegister src, BaseIndex addr) { MOZ_CRASH("NYI"); }
-
-    void loadFloat32x3(const Address& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadFloat32x3(const BaseIndex& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadAlignedSimd128Float(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeAlignedSimd128Float(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
-    void loadUnalignedSimd128Float(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadUnalignedSimd128Float(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeUnalignedSimd128Float(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
-    void storeUnalignedSimd128Float(FloatRegister src, BaseIndex addr) { MOZ_CRASH("NYI"); }
 
     void loadDouble(const Address& addr, FloatRegister dest);
     void loadDouble(const BaseIndex& src, FloatRegister dest);

@@ -9,6 +9,7 @@
 #include "mozilla/dom/DocumentFragment.h"
 #include "ChildIterator.h"
 #include "nsContentUtils.h"
+#include "nsLayoutUtils.h"
 #include "nsDOMClassInfoID.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsIStyleSheetLinkingElement.h"
@@ -101,6 +102,23 @@ ShadowRoot::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
   return mozilla::dom::ShadowRootBinding::Wrap(aCx, this, aGivenProto);
 }
 
+void
+ShadowRoot::CloneInternalDataFrom(ShadowRoot* aOther)
+{
+  size_t sheetCount = aOther->SheetCount();
+  for (size_t i = 0; i < sheetCount; ++i) {
+    StyleSheet* sheet = aOther->SheetAt(i);
+    if (sheet && sheet->IsApplicable()) {
+      // TODO: Remove AsGecko() call once Stylo is removed.
+      RefPtr<CSSStyleSheet> clonedSheet =
+        sheet->AsGecko()->Clone(nullptr, nullptr, nullptr, nullptr);
+      if (clonedSheet) {
+        AppendStyleSheet(*clonedSheet);
+      }
+    }
+  }
+}
+
 ShadowRoot*
 ShadowRoot::FromNode(nsINode* aNode)
 {
@@ -145,6 +163,19 @@ ShadowRoot::AddSlot(HTMLSlotElement* aSlot)
 
       oldSlot->RemoveAssignedNode(assignedNode);
       currentSlot->AppendAssignedNode(assignedNode);
+
+      Element* restyleElement;
+      if (assignedNode->IsElement()) {
+        restyleElement = assignedNode->AsElement();
+      } else {
+        // This is likely a text node. Use the host instead.
+        restyleElement = GetHost();
+      }
+      if (restyleElement) {
+        nsLayoutUtils::PostRestyleEvent(
+          restyleElement, eRestyle_Subtree, nsChangeHint(0));
+      }
+
       doEnqueueSlotChange = true;
     }
 
@@ -262,6 +293,13 @@ ShadowRoot::InsertSheet(StyleSheet* aSheet,
     }
 
     nsINode* sheetOwningNode = SheetAt(i)->GetOwnerNode();
+    
+    if (!sheetOwningNode) {
+      // Keep moving; all sheets with a sheetOwner come after all
+      // sheets without an owning Node
+      continue;
+    }
+    
     if (nsContentUtils::PositionIsBefore(aLinkingContent, sheetOwningNode)) {
       InsertSheetAt(i, *aSheet);
       mProtoBinding->InsertStyleSheetAt(i, aSheet);
@@ -311,6 +349,8 @@ ShadowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = true;
   aVisitor.mRootOfClosedTree = IsClosed();
+  // Inform that we're about to exit the current scope.
+  aVisitor.mRelatedTargetRetargetedInCurrentScope = false;
 
   // https://dom.spec.whatwg.org/#ref-for-get-the-parent%E2%91%A6
   if (!aVisitor.mEvent->mFlags.mComposed) {
@@ -333,12 +373,10 @@ ShadowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   nsIContent* shadowHost = GetHost();
   aVisitor.SetParentTarget(shadowHost, false);
 
-  if (aVisitor.mOriginalTargetIsInAnon) {
-    nsCOMPtr<nsIContent> content(do_QueryInterface(aVisitor.mEvent->mTarget));
-    if (content && content->GetBindingParent() == shadowHost) {
-      aVisitor.mEventTargetAtParent = shadowHost;
-    }
- }
+  nsCOMPtr<nsIContent> content(do_QueryInterface(aVisitor.mEvent->mTarget));
+  if (content && content->GetBindingParent() == shadowHost) {
+    aVisitor.mEventTargetAtParent = shadowHost;
+  }
 
   return NS_OK;
 }
@@ -488,25 +526,6 @@ ShadowRoot::Host()
   return host->AsElement();
 }
 
-bool
-ShadowRoot::ApplyAuthorStyles()
-{
-  return mProtoBinding->InheritsStyle();
-}
-
-void
-ShadowRoot::SetApplyAuthorStyles(bool aApplyAuthorStyles)
-{
-  mProtoBinding->SetInheritsStyle(aApplyAuthorStyles);
-
-  nsIPresShell* shell = OwnerDoc()->GetShell();
-  if (shell) {
-    OwnerDoc()->BeginUpdate(UPDATE_STYLE);
-    shell->RecordShadowStyleChange(this);
-    OwnerDoc()->EndUpdate(UPDATE_STYLE);
-  }
-}
-
 void
 ShadowRoot::AttributeChanged(nsIDocument* aDocument,
                              Element* aElement,
@@ -580,6 +599,13 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
   if (slot && slot->GetContainingShadow() == this &&
       slot->AssignedNodes().IsEmpty()) {
     slot->EnqueueSlotChangeEvent();
+    return;
+  }
+  
+  // XXX: The following makes the host destroy its frames and force a
+  // restyle for cases where the content isn't slotted.
+  if (aContainer == this) {
+    DistributionChanged();
   }
 }
 
@@ -616,6 +642,13 @@ ShadowRoot::ContentRemoved(nsIDocument* aDocument,
   if (slot && slot->GetContainingShadow() == this &&
       slot->AssignedNodes().IsEmpty()) {
     slot->EnqueueSlotChangeEvent();
+    return;
+  }
+
+  // XXX: The following makes the host destroy its frames and force a
+  // restyle for cases where the content isn't slotted.
+  if (aContainer == this) {
+    DistributionChanged();
   }
 }
 

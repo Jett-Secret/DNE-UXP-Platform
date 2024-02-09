@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-// vim:cindent:ts=4:et:sw=4:
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -109,7 +108,7 @@ SpanningCellSorter::GetNext(int32_t *aColSpan)
             /* prepare to enumerate the array */
             mState = ENUMERATING_ARRAY;
             mEnumerationIndex = 0;
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
         case ENUMERATING_ARRAY:
             while (mEnumerationIndex < ARRAY_SIZE && !mArray[mEnumerationIndex])
                 ++mEnumerationIndex;
@@ -139,7 +138,7 @@ SpanningCellSorter::GetNext(int32_t *aColSpan)
                              SortArray, nullptr);
                 mSortedHashTable = sh;
             }
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
         case ENUMERATING_HASH:
             if (mEnumerationIndex < mHashTable.EntryCount()) {
                 Item *result = mSortedHashTable[mEnumerationIndex]->mItems;
@@ -154,7 +153,7 @@ SpanningCellSorter::GetNext(int32_t *aColSpan)
                 return result;
             }
             mState = DONE;
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
         case DONE:
             ;
     }

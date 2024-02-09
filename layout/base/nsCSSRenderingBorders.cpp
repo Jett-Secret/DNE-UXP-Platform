@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:cindent:ts=2:et:sw=2:
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1236,7 +1235,7 @@ MakeBorderColor(nscolor aColor, nscolor aBackgroundColor,
 
     case BorderColorStyleLight:
       k = 1;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case BorderColorStyleDark:
       NS_GetSpecial3DColors(colors, aBackgroundColor, aColor);
       return Color::FromABGR(colors[k]);

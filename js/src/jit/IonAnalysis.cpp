@@ -2611,6 +2611,7 @@ IsResumableMIRType(MIRType type)
       case MIRType::Float32:
       case MIRType::String:
       case MIRType::Symbol:
+      case MIRType::BigInt:
       case MIRType::Object:
       case MIRType::MagicOptimizedArguments:
       case MIRType::MagicOptimizedOut:
@@ -4464,7 +4465,7 @@ JS_FOR_EACH_TRACEKIND(TRACE_ROOTS)
 #undef TRACE_ROOTS
 }
 
-MOZ_MUST_USE bool
+[[nodiscard]] bool
 jit::CreateMIRRootList(IonBuilder& builder)
 {
     MOZ_ASSERT(!builder.info().isAnalysis());

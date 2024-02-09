@@ -479,7 +479,7 @@ gfxFontShaper::MergeFontFeatures(
         case NS_FONT_VARIANT_CAPS_ALLSMALL:
             mergedFeatures.Put(HB_TAG('c','2','s','c'), 1);
             // fall through to the small-caps case
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
 
         case NS_FONT_VARIANT_CAPS_SMALLCAPS:
             mergedFeatures.Put(HB_TAG('s','m','c','p'), 1);
@@ -489,7 +489,7 @@ gfxFontShaper::MergeFontFeatures(
             mergedFeatures.Put(aAddSmallCaps ? HB_TAG('c','2','s','c') :
                                                HB_TAG('c','2','p','c'), 1);
             // fall through to the petite-caps case
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
 
         case NS_FONT_VARIANT_CAPS_PETITECAPS:
             mergedFeatures.Put(aAddSmallCaps ? HB_TAG('s','m','c','p') :
@@ -591,8 +591,16 @@ gfxFontShaper::GetRoundOffsetsToPixels(DrawTarget* aDrawTarget,
     }
 
     // Sometimes hint metrics gets set for us, most notably for printing.
+#ifdef MOZ_TREE_CAIRO
     cairo_hint_metrics_t hint_metrics =
         cairo_scaled_font_get_hint_metrics(scaled_font);
+#else
+    cairo_font_options_t* font_options = cairo_font_options_create();
+    cairo_scaled_font_get_font_options(scaled_font, font_options);
+    cairo_hint_metrics_t hint_metrics =
+        cairo_font_options_get_hint_metrics(font_options);
+    cairo_font_options_destroy(font_options);
+#endif
 
     switch (hint_metrics) {
     case CAIRO_HINT_METRICS_OFF:
@@ -615,7 +623,7 @@ gfxFontShaper::GetRoundOffsetsToPixels(DrawTarget* aDrawTarget,
                     DWRITE_MEASURING_MODE_NATURAL) {
                 return;
             }
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
 #endif
         case CAIRO_FONT_TYPE_QUARTZ:
             // Quartz surfaces implement show_glyphs for Quartz fonts
@@ -1171,12 +1179,14 @@ gfxFont::CheckForFeaturesInvolvingSpace()
             sScriptTagToCode->Put(HB_TAG('D','F','L','T'), Script::COMMON);
             for (Script s = Script::ARABIC; s < Script::NUM_SCRIPT_CODES;
                  s = Script(static_cast<int>(s) + 1)) {
-                hb_script_t scriptTag = hb_script_t(GetScriptTagForCode(s));
-                hb_tag_t s1, s2;
-                hb_ot_tags_from_script(scriptTag, &s1, &s2);
-                sScriptTagToCode->Put(s1, s);
-                if (s2 != HB_OT_TAG_DEFAULT_SCRIPT) {
-                    sScriptTagToCode->Put(s2, s);
+                hb_script_t script = hb_script_t(GetScriptTagForCode(s));
+                unsigned int scriptCount = 4;
+                hb_tag_t scriptTags[4];
+                hb_ot_tags_from_script_and_language(script, HB_LANGUAGE_INVALID,
+                                                    &scriptCount, scriptTags, nullptr,
+                                                    nullptr);
+                for (unsigned int i = 0; i < scriptCount; i++) {
+                  sScriptTagToCode->Put(scriptTags[i], s);
                 }
             }
 
@@ -3117,7 +3127,7 @@ gfxFont::InitFakeSmallCapsRun(DrawTarget     *aDrawTarget,
             case kUppercaseReduce:
                 // use reduced-size font, then fall through to uppercase the text
                 f = smallCapsFont;
-                MOZ_FALLTHROUGH;
+                [[fallthrough]];
 
             case kUppercase:
                 // apply uppercase transform to the string

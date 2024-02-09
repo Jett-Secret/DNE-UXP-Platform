@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -264,7 +263,7 @@ MP4TrackDemuxer::GetNextSample()
       mp4_demuxer::H264::FrameType type =
         mp4_demuxer::H264::GetFrameType(sample);
       switch (type) {
-        case mp4_demuxer::H264::FrameType::I_FRAME: MOZ_FALLTHROUGH;
+        case mp4_demuxer::H264::FrameType::I_FRAME: [[fallthrough]];
         case mp4_demuxer::H264::FrameType::OTHER:
         {
           bool keyframe = type == mp4_demuxer::H264::FrameType::I_FRAME;

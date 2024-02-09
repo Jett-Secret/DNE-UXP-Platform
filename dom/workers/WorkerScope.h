@@ -24,6 +24,7 @@ class Function;
 class IDBFactory;
 enum class ImageBitmapFormat : uint32_t;
 class Performance;
+struct StructuredSerializeOptions;
 class Promise;
 class RequestOrUSVString;
 class ServiceWorkerRegistration;
@@ -131,11 +132,11 @@ public:
   ClearTimeout(int32_t aHandle);
   int32_t
   SetInterval(JSContext* aCx, Function& aHandler,
-              const Optional<int32_t>& aTimeout,
+              const int32_t aTimeout,
               const Sequence<JS::Value>& aArguments, ErrorResult& aRv);
   int32_t
   SetInterval(JSContext* aCx, const nsAString& aHandler,
-              const Optional<int32_t>& aTimeout,
+              const int32_t aTimeout,
               const Sequence<JS::Value>& /* unused */, ErrorResult& aRv);
   void
   ClearInterval(int32_t aHandle);
@@ -150,6 +151,8 @@ public:
 
   IMPL_EVENT_HANDLER(online)
   IMPL_EVENT_HANDLER(offline)
+  IMPL_EVENT_HANDLER(rejectionhandled)
+  IMPL_EVENT_HANDLER(unhandledrejection)
 
   void
   Dump(const Optional<nsAString>& aString) const;
@@ -181,6 +184,11 @@ public:
                     mozilla::dom::ImageBitmapFormat aFormat,
                     const mozilla::dom::Sequence<mozilla::dom::ChannelPixelLayout>& aLayout,
                     mozilla::ErrorResult& aRv);
+
+  void StructuredClone(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                       const StructuredSerializeOptions& aOptions,
+                       JS::MutableHandle<JS::Value> aRv,
+                       ErrorResult& aError);
 
   bool
   WindowInteractionAllowed() const
@@ -215,7 +223,13 @@ public:
 
   void
   PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-              const Optional<Sequence<JS::Value>>& aTransferable,
+              const Sequence<JSObject*>& aTransferable,
+              ErrorResult& aRv);
+
+  void
+  PostMessage(JSContext* aCx,
+              JS::Handle<JS::Value> aMessage,
+              const StructuredSerializeOptions& aOptions,
               ErrorResult& aRv);
 
   IMPL_EVENT_HANDLER(message)

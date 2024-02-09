@@ -116,7 +116,7 @@ struct BaselineStackBuilder
         js_free(buffer_);
     }
 
-    MOZ_MUST_USE bool init() {
+    [[nodiscard]] bool init() {
         MOZ_ASSERT(!buffer_);
         MOZ_ASSERT(bufferUsed_ == 0);
         buffer_ = reinterpret_cast<uint8_t*>(js_calloc(bufferTotal_));
@@ -142,7 +142,7 @@ struct BaselineStackBuilder
         return true;
     }
 
-    MOZ_MUST_USE bool enlarge() {
+    [[nodiscard]] bool enlarge() {
         MOZ_ASSERT(buffer_ != nullptr);
         if (bufferTotal_ & mozilla::tl::MulOverflowMask<2>::value)
             return false;
@@ -182,7 +182,7 @@ struct BaselineStackBuilder
         return framePushed_;
     }
 
-    MOZ_MUST_USE bool subtract(size_t size, const char* info = nullptr) {
+    [[nodiscard]] bool subtract(size_t size, const char* info = nullptr) {
         // enlarge the buffer if need be.
         while (size > bufferAvail_) {
             if (!enlarge())
@@ -203,7 +203,7 @@ struct BaselineStackBuilder
     }
 
     template <typename T>
-    MOZ_MUST_USE bool write(const T& t) {
+    [[nodiscard]] bool write(const T& t) {
         MOZ_ASSERT(!(uintptr_t(&t) >= uintptr_t(header_->copyStackBottom) &&
                      uintptr_t(&t) < uintptr_t(header_->copyStackTop)),
                    "Should not reference memory that can be freed");
@@ -214,7 +214,7 @@ struct BaselineStackBuilder
     }
 
     template <typename T>
-    MOZ_MUST_USE bool writePtr(T* t, const char* info) {
+    [[nodiscard]] bool writePtr(T* t, const char* info) {
         if (!write<T*>(t))
             return false;
         if (info)
@@ -224,7 +224,7 @@ struct BaselineStackBuilder
         return true;
     }
 
-    MOZ_MUST_USE bool writeWord(size_t w, const char* info) {
+    [[nodiscard]] bool writeWord(size_t w, const char* info) {
         if (!write<size_t>(w))
             return false;
         if (info) {
@@ -241,7 +241,7 @@ struct BaselineStackBuilder
         return true;
     }
 
-    MOZ_MUST_USE bool writeValue(const Value& val, const char* info) {
+    [[nodiscard]] bool writeValue(const Value& val, const char* info) {
         if (!write<Value>(val))
             return false;
         if (info) {
@@ -253,7 +253,7 @@ struct BaselineStackBuilder
         return true;
     }
 
-    MOZ_MUST_USE bool maybeWritePadding(size_t alignment, size_t after, const char* info) {
+    [[nodiscard]] bool maybeWritePadding(size_t alignment, size_t after, const char* info) {
         MOZ_ASSERT(framePushed_ % sizeof(Value) == 0);
         MOZ_ASSERT(after % sizeof(Value) == 0);
         size_t offset = ComputeByteAlignment(after, alignment);
@@ -1803,6 +1803,14 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
     MOZ_ASSERT(numFrames > 0);
     BailoutKind bailoutKind = bailoutInfo->bailoutKind;
     bool checkGlobalDeclarationConflicts = bailoutInfo->checkGlobalDeclarationConflicts;
+    uint8_t* incomingStack = bailoutInfo->incomingStack;
+
+    // We have to get rid of the rematerialized frame, whether it is
+    // restored or unwound.
+    auto guardRemoveRematerializedFramesFromDebugger = mozilla::MakeScopeExit([&] {
+        JitActivation* act = cx->activation()->asJit();
+        act->removeRematerializedFramesFromDebugger(cx, incomingStack);
+    });
 
     // Free the bailout buffer.
     js_free(bailoutInfo);
@@ -1876,6 +1884,7 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
             if (frameno == numFrames - 1) {
                 outerScript = frame->script();
                 outerFp = iter.fp();
+                MOZ_ASSERT(outerFp == incomingStack);
             }
 
             frameno++;
@@ -1902,18 +1911,23 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
                 // We must attempt to copy all rematerialized frames over,
                 // even if earlier ones failed, to invoke the proper frame
                 // cleanup in the Debugger.
-                ok = CopyFromRematerializedFrame(cx, act, outerFp, --inlineDepth,
-                                                 iter.baselineFrame());
+                if (!CopyFromRematerializedFrame(cx, act, outerFp, --inlineDepth,
+                                                 iter.baselineFrame()))
+                {
+                    ok = false;
+                }
             }
             ++iter;
         }
 
-        // After copying from all the rematerialized frames, remove them from
-        // the table to keep the table up to date.
-        act->removeRematerializedFrame(outerFp);
-
         if (!ok)
             return false;
+
+        // After copying from all the rematerialized frames, remove them from
+        // the table to keep the table up to date.
+        guardRemoveRematerializedFramesFromDebugger.release();
+        act->removeRematerializedFrame(outerFp);
+
     }
 
     JitSpew(JitSpew_BaselineBailouts,
@@ -1944,7 +1958,7 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
       case Bailout_NonObjectInput:
       case Bailout_NonStringInput:
       case Bailout_NonSymbolInput:
-      case Bailout_UnexpectedSimdInput:
+      case Bailout_NonBigIntInput:
       case Bailout_NonSharedTypedArrayInput:
       case Bailout_Debugger:
       case Bailout_UninitializedThis:
@@ -1961,7 +1975,7 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
       // Invalid assumption based on baseline code.
       case Bailout_OverflowInvalidate:
         outerScript->setHadOverflowBailout();
-        MOZ_FALLTHROUGH;
+        [[fallthrough]];
       case Bailout_NonStringInputInvalidate:
       case Bailout_DoubleOutput:
       case Bailout_ObjectIdentityOrTypeGuard:

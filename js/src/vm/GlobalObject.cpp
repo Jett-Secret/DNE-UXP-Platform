@@ -15,14 +15,15 @@
 #include "jsweakmap.h"
 
 #include "builtin/AtomicsObject.h"
+#include "builtin/BigInt.h"
 #include "builtin/Eval.h"
-#include "builtin/Intl.h"
 #include "builtin/MapObject.h"
 #include "builtin/ModuleObject.h"
 #include "builtin/Object.h"
 #include "builtin/Promise.h"
 #include "builtin/RegExp.h"
 #include "builtin/SelfHostingDefines.h"
+#include "builtin/Stream.h"
 #include "builtin/SymbolObject.h"
 #include "builtin/TypedObject.h"
 #include "builtin/WeakMapObject.h"
@@ -51,7 +52,7 @@ struct ProtoTableEntry {
 
 namespace js {
 
-#define DECLARE_PROTOTYPE_CLASS_INIT(name,code,init,clasp) \
+#define DECLARE_PROTOTYPE_CLASS_INIT(name,init,clasp) \
     extern JSObject* init(JSContext* cx, Handle<JSObject*> obj);
 JS_FOR_EACH_PROTOTYPE(DECLARE_PROTOTYPE_CLASS_INIT)
 #undef DECLARE_PROTOTYPE_CLASS_INIT
@@ -65,8 +66,8 @@ js::InitViaClassSpec(JSContext* cx, Handle<JSObject*> obj)
 }
 
 static const ProtoTableEntry protoTable[JSProto_LIMIT] = {
-#define INIT_FUNC(name,code,init,clasp) { clasp, init },
-#define INIT_FUNC_DUMMY(name,code,init,clasp) { nullptr, nullptr },
+#define INIT_FUNC(name,init,clasp) { clasp, init },
+#define INIT_FUNC_DUMMY(name,init,clasp) { nullptr, nullptr },
     JS_FOR_PROTOTYPES(INIT_FUNC, INIT_FUNC_DUMMY)
 #undef INIT_FUNC_DUMMY
 #undef INIT_FUNC
@@ -93,21 +94,30 @@ js::GlobalObject::getTypedObjectModule() const {
 /* static */ bool
 GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key)
 {
-    if (key == JSProto_WebAssembly)
-        return !wasm::HasSupport(cx);
-
-#ifdef ENABLE_SHARED_ARRAY_BUFFER
     // Return true if the given constructor has been disabled at run-time.
     switch (key) {
+      case JSProto_WebAssembly:
+        return !wasm::HasSupport(cx);
+
+      case JSProto_ReadableStream:
+      case JSProto_ReadableStreamDefaultReader:
+      case JSProto_ReadableStreamBYOBReader:
+      case JSProto_ReadableStreamDefaultController:
+      case JSProto_ReadableByteStreamController:
+      case JSProto_ReadableStreamBYOBRequest:
+      case JSProto_ByteLengthQueuingStrategy:
+      case JSProto_CountQueuingStrategy:
+        return !cx->options().streams();
+
+#ifdef ENABLE_SHARED_ARRAY_BUFFER
       case JSProto_Atomics:
       case JSProto_SharedArrayBuffer:
         return !cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled();
+#endif
+
       default:
         return false;
     }
-#else
-    return false;
-#endif
 }
 
 /* static */ bool
@@ -526,23 +536,30 @@ GlobalObject::initSelfHostingBuiltins(JSContext* cx, Handle<GlobalObject*> globa
            InitBareBuiltinCtor(cx, global, JSProto_TypedArray) &&
            InitBareBuiltinCtor(cx, global, JSProto_Uint8Array) &&
            InitBareBuiltinCtor(cx, global, JSProto_Int32Array) &&
+           InitBareSymbolCtor(cx, global) &&
            InitBareWeakMapCtor(cx, global) &&
            InitStopIterationClass(cx, global) &&
            DefineFunctions(cx, global, builtins, AsIntrinsic);
 }
 
 /* static */ bool
-GlobalObject::isRuntimeCodeGenEnabled(JSContext* cx, Handle<GlobalObject*> global)
+GlobalObject::isRuntimeCodeGenEnabled(JSContext* cx, HandleValue code,
+                                      Handle<GlobalObject*> global)
 {
     HeapSlot& v = global->getSlotRef(RUNTIME_CODEGEN_ENABLED);
     if (v.isUndefined()) {
         /*
          * If there are callbacks, make sure that the CSP callback is installed
-         * and that it permits runtime code generation, then cache the result.
+         * and that it permits runtime code generation.
          */
         JSCSPEvalChecker allows = cx->runtime()->securityCallbacks->contentSecurityPolicyAllows;
-        Value boolValue = BooleanValue(!allows || allows(cx));
-        v.set(global, HeapSlot::Slot, RUNTIME_CODEGEN_ENABLED, boolValue);
+        if (allows)
+          return allows(cx, code);
+
+        // Let's cache the result only if the contentSecurityPolicyAllows callback is not set. In
+        // this way, contentSecurityPolicyAllows callback is executed each time, with the current
+        // HandleValue code.
+        v.set(global, HeapSlot::Slot, RUNTIME_CODEGEN_ENABLED, JS::TrueValue());
     }
     return !v.isFalse();
 }

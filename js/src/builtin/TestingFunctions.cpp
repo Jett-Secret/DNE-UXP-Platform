@@ -1334,8 +1334,8 @@ SettlePromiseNow(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    RootedNativeObject promise(cx, &args[0].toObject().as<NativeObject>());
-    int32_t flags = promise->getFixedSlot(PromiseSlot_Flags).toInt32();
+    Rooted<PromiseObject*> promise(cx, &args[0].toObject().as<PromiseObject>());
+    int32_t flags = promise->flags();
     promise->setFixedSlot(PromiseSlot_Flags,
                           Int32Value(flags | PROMISE_FLAG_RESOLVED | PROMISE_FLAG_FULFILLED));
     promise->setFixedSlot(PromiseSlot_ReactionsOrResult, UndefinedValue());
@@ -1398,6 +1398,11 @@ ResolvePromise(JSContext* cx, unsigned argc, Value* vp)
             return false;
     }
 
+    if (IsPromiseForAsync(promise)) {
+        JS_ReportErrorASCII(cx, "async function's promise shouldn't be manually resolved");
+        return false;
+    }
+
     bool result = JS::ResolvePromise(cx, promise, resolution);
     if (result)
         args.rval().setUndefined();
@@ -1425,10 +1430,23 @@ RejectPromise(JSContext* cx, unsigned argc, Value* vp)
             return false;
     }
 
+    if (IsPromiseForAsync(promise)) {
+        JS_ReportErrorASCII(cx, "async function's promise shouldn't be manually rejected");
+        return false;
+    }
+
     bool result = JS::RejectPromise(cx, promise, reason);
     if (result)
         args.rval().setUndefined();
     return result;
+}
+
+static bool
+StreamsAreEnabled(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setBoolean(cx->options().streams());
+    return true;
 }
 
 static unsigned finalizeCount = 0;
@@ -3104,7 +3122,7 @@ static bool
 IsSimdAvailable(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-#if defined(JS_CODEGEN_NONE) || !defined(ENABLE_SIMD)
+#if defined(JS_CODEGEN_NONE)
     bool available = false;
 #else
     bool available = cx->jitSupportsSimd();
@@ -4133,6 +4151,10 @@ JS_FN_HELP("resolvePromise", ResolvePromise, 2, 0,
 JS_FN_HELP("rejectPromise", RejectPromise, 2, 0,
 "rejectPromise(promise, reason)",
 "  Reject a Promise by calling the JSAPI function JS::RejectPromise."),
+
+JS_FN_HELP("streamsAreEnabled", StreamsAreEnabled, 0, 0,
+"streamsAreEnabled()",
+"  Returns a boolean indicating whether WHATWG Streams are enabled for the current compartment."),
 
     JS_FN_HELP("makeFinalizeObserver", MakeFinalizeObserver, 0, 0,
 "makeFinalizeObserver()",

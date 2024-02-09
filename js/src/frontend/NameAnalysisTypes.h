@@ -64,6 +64,12 @@ class EnvironmentCoordinate
 
 namespace frontend {
 
+enum class ParseGoal : uint8_t
+{
+    Script,
+    Module
+};
+
 // A detailed kind used for tracking declarations in the Parser. Used for
 // specific early error semantics and better error messages.
 enum class DeclarationKind : uint8_t
@@ -131,7 +137,7 @@ class DeclaredNameInfo
     // If the declared name is a binding, whether the binding is closed
     // over. Its value is meaningless if the declared name is not a binding
     // (i.e., a 'var' declared name in a non-var scope).
-    bool closedOver_;
+    bool closedOver_ : 1;
 
   public:
     explicit DeclaredNameInfo(DeclarationKind kind, uint32_t pos)

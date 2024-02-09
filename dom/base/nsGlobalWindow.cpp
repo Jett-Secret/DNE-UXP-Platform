@@ -222,6 +222,7 @@
 #include "mozilla/dom/PrimitiveConversions.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "nsITabChild.h"
+#include "mozilla/dom/ModuleScript.h"
 #include "mozilla/dom/MediaQueryList.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/NavigatorBinding.h"
@@ -907,7 +908,8 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mOuterWindow(aOuterWindow),
   // Make sure no actual window ends up with mWindowID == 0
   mWindowID(NextWindowID()), mHasNotifiedGlobalCreated(false),
-  mMarkedCCGeneration(0), mServiceWorkersTestingEnabled(false)
+  mMarkedCCGeneration(0), mServiceWorkersTestingEnabled(false),
+  mEvent(nullptr)
  {}
 
 template<class T>
@@ -3540,7 +3542,10 @@ nsGlobalWindow::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   EventMessage msg = aVisitor.mEvent->mMessage;
 
   aVisitor.mCanHandle = true;
-  aVisitor.mForceContentDispatch = true; //FIXME! Bug 329119
+  // Middle/right click shouldn't dispatch click event, use auxclick to instead.
+  if (mDoc->IsXULDocument()) {
+    aVisitor.mForceContentDispatch = true; //FIXME! Bug 329119
+  }
   if (msg == eResize && aVisitor.mEvent->IsTrusted()) {
     // QIing to window so that we can keep the old behavior also in case
     // a child window is handling resize.
@@ -4218,6 +4223,15 @@ Performance*
 nsGlobalWindow::GetPerformance()
 {
   return AsInner()->GetPerformance();
+}
+
+void
+nsPIDOMWindowInner::QueuePerformanceNavigationTiming()
+{
+  CreatePerformanceObjectIfNeeded();
+  if (mPerformance) {
+    mPerformance->QueueNavigationTimingEntry();
+  }
 }
 
 void
@@ -5241,6 +5255,16 @@ nsGlobalWindow::SetOpener(JSContext* aCx, JS::Handle<JS::Value> aOpener,
   }
 
   SetOpenerWindow(outer, false);
+}
+
+void
+nsGlobalWindow::GetEvent(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval)
+{
+  if (mEvent) {
+    Unused << nsContentUtils::WrapNative(aCx, mEvent, aRetval);
+  } else {
+    aRetval.setUndefined();
+  }
 }
 
 void
@@ -6897,11 +6921,12 @@ nsGlobalWindow::SetFullscreenInternal(FullscreenReason aReason,
   // gone full screen, the state trap above works.
   mFullScreen = aFullScreen;
 
-  // Sometimes we don't want the top-level widget to actually go fullscreen,
-  // for example in the B2G desktop client, we don't want the emulated screen
-  // dimensions to appear to increase when entering fullscreen mode; we just
-  // want the content to fill the entire client area of the emulator window.
-  if (!Preferences::GetBool("full-screen-api.ignore-widgets", false)) {
+  // Sometimes, users don't want the DOM to actually go fullscreen, for
+  // example on large monitors where it would waste screen real estate.
+  // When restricted by the relevant preference, we just want the content
+  // to fill the area of the existing window, instead, which is done by
+  // skipping resizing of the top-level content widget to be screen-filling.
+  if (!Preferences::GetBool("full-screen-api.restrict-to-window", false)) {
     if (MakeWidgetFullscreen(this, aReason, aFullScreen)) {
       // The rest of code for switching fullscreen is in nsGlobalWindow::
       // FinishFullscreenChange() which will be called after sizemodechange
@@ -8880,30 +8905,33 @@ nsGlobalWindow::PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
 }
 
 void
-nsGlobalWindow::PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
+nsGlobalWindow::PostMessageMoz(JSContext* aCx,
+                               JS::Handle<JS::Value> aMessage,
                                const nsAString& aTargetOrigin,
-                               const Optional<Sequence<JS::Value>>& aTransfer,
+                               const Sequence<JSObject*>& aTransfer,
                                nsIPrincipal& aSubjectPrincipal,
-                               ErrorResult& aError)
+                               ErrorResult& aRv)
 {
   JS::Rooted<JS::Value> transferArray(aCx, JS::UndefinedValue());
-  if (aTransfer.WasPassed()) {
-    const Sequence<JS::Value >& values = aTransfer.Value();
-
-    // The input sequence only comes from the generated bindings code, which
-    // ensures it is rooted.
-    JS::HandleValueArray elements =
-      JS::HandleValueArray::fromMarkedLocation(values.Length(), values.Elements());
-
-    transferArray = JS::ObjectOrNullValue(JS_NewArrayObject(aCx, elements));
-    if (transferArray.isNull()) {
-      aError.Throw(NS_ERROR_OUT_OF_MEMORY);
-      return;
-    }
+  aRv = nsContentUtils::CreateJSValueFromSequenceOfObject(aCx, aTransfer,
+                                                          &transferArray);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
   }
 
   PostMessageMoz(aCx, aMessage, aTargetOrigin, transferArray,
-                 aSubjectPrincipal, aError);
+                 aSubjectPrincipal, aRv);
+}
+
+void
+nsGlobalWindow::PostMessageMoz(JSContext* aCx,
+                               JS::Handle<JS::Value> aMessage,
+                               const WindowPostMessageOptions& aOptions,
+                               nsIPrincipal& aSubjectPrincipal,
+                               ErrorResult& aRv)
+{
+  PostMessageMoz(aCx, aMessage, aOptions.mTargetOrigin, aOptions.mTransfer,
+                 aSubjectPrincipal, aRv);
 }
 
 class nsCloseEvent : public Runnable {
@@ -12670,41 +12698,22 @@ nsGlobalWindow::SetTimeout(JSContext* aCx, const nsAString& aHandler,
   return SetTimeoutOrInterval(aCx, aHandler, aTimeout, false, aError);
 }
 
-static bool
-IsInterval(const Optional<int32_t>& aTimeout, int32_t& aResultTimeout)
-{
-  if (aTimeout.WasPassed()) {
-    aResultTimeout = aTimeout.Value();
-    return true;
-  }
-
-  // If no interval was specified, treat this like a timeout, to avoid setting
-  // an interval of 0 milliseconds.
-  aResultTimeout = 0;
-  return false;
-}
-
 int32_t
 nsGlobalWindow::SetInterval(JSContext* aCx, Function& aFunction,
-                            const Optional<int32_t>& aTimeout,
+                            const int32_t aTimeout,
                             const Sequence<JS::Value>& aArguments,
                             ErrorResult& aError)
 {
-  int32_t timeout;
-  bool isInterval = IsInterval(aTimeout, timeout);
-  return SetTimeoutOrInterval(aCx, aFunction, timeout, aArguments, isInterval,
-                              aError);
+  return SetTimeoutOrInterval(aCx, aFunction, aTimeout, aArguments, true, aError);
 }
 
 int32_t
 nsGlobalWindow::SetInterval(JSContext* aCx, const nsAString& aHandler,
-                            const Optional<int32_t>& aTimeout,
+                            const int32_t aTimeout,
                             const Sequence<JS::Value>& /* unused */,
                             ErrorResult& aError)
 {
-  int32_t timeout;
-  bool isInterval = IsInterval(aTimeout, timeout);
-  return SetTimeoutOrInterval(aCx, aHandler, timeout, isInterval, aError);
+  return SetTimeoutOrInterval(aCx, aHandler, aTimeout, true, aError);
 }
 
 nsresult
@@ -12917,9 +12926,6 @@ nsGlobalWindow::RunTimeoutHandler(Timeout* aTimeout,
     RefPtr<Function> callback = handler->GetCallback();
 
     if (!callback) {
-      // Evaluate the timeout expression.
-      const nsAString& script = handler->GetHandlerText();
-
       const char* filename = nullptr;
       uint32_t lineNo = 0, dummyColumn = 0;
       handler->GetLocation(&filename, &lineNo, &dummyColumn);
@@ -12930,9 +12936,22 @@ nsGlobalWindow::RunTimeoutHandler(Timeout* aTimeout,
       AutoEntryScript aes(this, reason, true);
       JS::CompileOptions options(aes.cx());
       options.setFileAndLine(filename, lineNo).setVersion(JSVERSION_DEFAULT);
+      options.setNoScriptRval(true);
       JS::Rooted<JSObject*> global(aes.cx(), FastGetGlobalJSObject());
-      nsresult rv =
-        nsJSUtils::EvaluateString(aes.cx(), script, global, options);
+      nsresult rv;
+      {
+         nsJSUtils::ExecutionContext exec(aes.cx(), global);
+         rv = exec.Compile(options, handler->GetHandlerText());
+
+         if (rv == NS_OK) {
+           LoadedScript* initiatingScript = handler->GetInitiatingScript();
+           if (initiatingScript) {
+             initiatingScript->AssociateWithScript(exec.GetScript());
+           }
+
+           rv = exec.ExecScript();
+         }
+      }
       if (rv == NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE) {
         abortIntervalHandler = true;
       }
@@ -12973,12 +12992,6 @@ nsGlobalWindow::RunTimeoutHandler(Timeout* aTimeout,
   // propagate the error to anyone who cares about it from this
   // point anyway, and the script context should have already reported
   // the script error in the usual way - so we just drop it.
-
-  // Since we might be processing more timeouts, go ahead and flush the promise
-  // queue now before we do that.  We need to do that while we're still in our
-  // "running JS is safe" state (e.g. mRunningTimeout is set, timeout->mRunning
-  // is false).
-  Promise::PerformMicroTaskCheckpoint();
 
   if (trackNestingLevel) {
     sNestingLevel = nestingLevel;
@@ -14625,6 +14638,17 @@ nsGlobalWindow::CreateImageBitmap(const ImageBitmapSource& aImage,
     aRv.Throw(NS_ERROR_TYPE_ERR);
     return nullptr;
   }
+}
+
+// https://html.spec.whatwg.org/#structured-cloning
+void
+nsGlobalWindow::StructuredClone(JSContext* aCx,
+                                JS::Handle<JS::Value> aValue,
+                                const StructuredSerializeOptions& aOptions,
+                                JS::MutableHandle<JS::Value> aRv,
+                                ErrorResult& aError)
+{
+  nsContentUtils::StructuredClone(aCx, this, aValue, aOptions, aRv, aError);
 }
 
 // Helper called by methods that move/resize the window,

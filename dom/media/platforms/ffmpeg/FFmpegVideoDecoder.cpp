@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,6 +11,7 @@
 #include "MediaInfo.h"
 #include "VPXDecoder.h"
 #include "MP4Decoder.h"
+#include "mozilla/layers/KnowsCompositor.h"
 
 #include "FFmpegVideoDecoder.h"
 #include "FFmpegLog.h"
@@ -24,6 +24,7 @@
 #define AV_PIX_FMT_YUV420P PIX_FMT_YUV420P
 #define AV_PIX_FMT_YUVJ420P PIX_FMT_YUVJ420P
 #define AV_PIX_FMT_YUV444P PIX_FMT_YUV444P
+#define AV_PIX_FMT_GBRP PIX_FMT_GBRP
 #define AV_PIX_FMT_NONE PIX_FMT_NONE
 #endif
 
@@ -54,6 +55,9 @@ ChoosePixelFormat(AVCodecContext* aCodecContext, const AVPixelFormat* aFormats)
       case AV_PIX_FMT_YUVJ420P:
         FFMPEG_LOG("Requesting pixel format YUVJ420P.");
         return AV_PIX_FMT_YUVJ420P;
+      case AV_PIX_FMT_GBRP:
+        FFMPEG_LOG("Requesting pixel format GBRP.");
+        return AV_PIX_FMT_GBRP;
       default:
         break;
     }
@@ -105,8 +109,9 @@ FFmpegVideoDecoder<LIBAV_VER>::PtsCorrectionContext::Reset()
 FFmpegVideoDecoder<LIBAV_VER>::FFmpegVideoDecoder(FFmpegLibWrapper* aLib,
   TaskQueue* aTaskQueue, MediaDataDecoderCallback* aCallback,
   const VideoInfo& aConfig,
-  ImageContainer* aImageContainer)
+  KnowsCompositor* aAllocator, ImageContainer* aImageContainer)
   : FFmpegDataDecoder(aLib, aTaskQueue, aCallback, GetCodecId(aConfig.mMimeType))
+  , mImageAllocator(aAllocator)
   , mImageContainer(aImageContainer)
   , mInfo(aConfig)
   , mCodecParser(nullptr)
@@ -361,7 +366,8 @@ FFmpegVideoDecoder<LIBAV_VER>::CreateImage(int64_t aOffset, int64_t aPts,
 
   b.mPlanes[0].mWidth = mFrame->width;
   b.mPlanes[0].mHeight = mFrame->height;
-  if (mCodecContext->pix_fmt == AV_PIX_FMT_YUV444P) {
+  if (mCodecContext->pix_fmt == AV_PIX_FMT_YUV444P ||
+      mCodecContext->pix_fmt == AV_PIX_FMT_GBRP) {
     b.mPlanes[1].mWidth = b.mPlanes[2].mWidth = mFrame->width;
     b.mPlanes[1].mHeight = b.mPlanes[2].mHeight = mFrame->height;
   } else {
@@ -377,10 +383,18 @@ FFmpegVideoDecoder<LIBAV_VER>::CreateImage(int64_t aOffset, int64_t aPts,
       case AVCOL_SPC_BT470BG:
         b.mYUVColorSpace = YUVColorSpace::BT601;
         break;
+      case AVCOL_SPC_RGB:
+        b.mYUVColorSpace = YUVColorSpace::IDENTITY;
+        break;
       default:
         break;
     }
   }
+ if (mLib->av_frame_get_color_range) {
+   auto range = mLib->av_frame_get_color_range(mFrame);
+   b.mColorRange = range == AVCOL_RANGE_JPEG ? ColorRange::FULL : ColorRange::LIMITED;
+ }
+
   RefPtr<VideoData> v =
     VideoData::CreateAndCopyData(mInfo,
                                   mImageContainer,
@@ -391,7 +405,8 @@ FFmpegVideoDecoder<LIBAV_VER>::CreateImage(int64_t aOffset, int64_t aPts,
                                   !!mFrame->key_frame,
                                   -1,
                                   mInfo.ScaledImageRect(mFrame->width,
-                                                        mFrame->height));
+                                                        mFrame->height),
+                                  mImageAllocator);
 
   if (!v) {
     return MediaResult(NS_ERROR_OUT_OF_MEMORY,

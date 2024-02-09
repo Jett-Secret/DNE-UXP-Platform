@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:set ts=2 sts=2 sw=2 et cin:
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -195,6 +194,7 @@ void AddQuarantineMetadataToFile(const CFStringRef filePath,
                                  const CFURLRef sourceURL,
                                  const CFURLRef referrerURL,
                                  const bool isFromWeb) {
+#if defined(MAC_OS_X_VERSION_10_6) && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6)
   CFURLRef fileURL = ::CFURLCreateWithFileSystemPath(kCFAllocatorDefault,
                                                      filePath,
                                                      kCFURLPOSIXPathStyle,
@@ -255,6 +255,7 @@ void AddQuarantineMetadataToFile(const CFStringRef filePath,
 
   ::CFRelease(fileURL);
   ::CFRelease(mutQuarantineProps);
+#endif
 }
 
 CFURLRef GetTemporaryFolderCFURLRef()

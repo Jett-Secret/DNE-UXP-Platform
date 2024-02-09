@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -39,7 +38,8 @@ ogg_packet InitTheoraPacket(const unsigned char* aData, size_t aLength,
 }
 
 TheoraDecoder::TheoraDecoder(const CreateDecoderParams& aParams)
-  : mImageContainer(aParams.mImageContainer)
+  : mImageAllocator(aParams.mKnowsCompositor)
+  , mImageContainer(aParams.mImageContainer)
   , mTaskQueue(aParams.mTaskQueue)
   , mCallback(aParams.mCallback)
   , mIsFlushing(false)
@@ -177,7 +177,8 @@ TheoraDecoder::DoDecode(MediaRawData* aSample)
                                    aSample->mKeyframe,
                                    aSample->mTimecode,
                                    mInfo.ScaledImageRect(mTheoraInfo.frame_width,
-                                                         mTheoraInfo.frame_height));
+                                                         mTheoraInfo.frame_height),
+                                   mImageAllocator);
     if (!v) {
       LOG("Image allocation error source %ldx%ld display %ldx%ld picture %ldx%ld",
           mTheoraInfo.frame_width, mTheoraInfo.frame_height, mInfo.mDisplay.width, mInfo.mDisplay.height,

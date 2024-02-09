@@ -18,6 +18,7 @@
 #include "gc/Barrier.h"
 #include "gc/Heap.h"
 #include "gc/Marking.h"
+#include "js/RootingAPI.h"
 #include "js/Value.h"
 #include "vm/Shape.h"
 #include "vm/ShapedObject.h"
@@ -485,6 +486,9 @@ class NativeObject : public ShapedObject
         return cells && cells->hasCell(cell);
     }
 
+    static inline NativeObject*
+    createWithTemplate(JSContext* cx, js::gc::InitialHeap heap, HandleObject templateObject);
+
   protected:
 #ifdef DEBUG
     void checkShapeConsistency();
@@ -511,7 +515,7 @@ class NativeObject : public ShapedObject
      */
     bool setSlotSpan(ExclusiveContext* cx, uint32_t span);
 
-    static MOZ_MUST_USE bool toDictionaryMode(ExclusiveContext* cx, HandleNativeObject obj);
+    [[nodiscard]] static bool toDictionaryMode(ExclusiveContext* cx, HandleNativeObject obj);
 
   private:
     friend class TenuringTracer;
@@ -610,13 +614,13 @@ class NativeObject : public ShapedObject
     }
 
   public:
-    static MOZ_MUST_USE bool generateOwnShape(ExclusiveContext* cx, HandleNativeObject obj,
+    [[nodiscard]] static bool generateOwnShape(ExclusiveContext* cx, HandleNativeObject obj,
                                               Shape* newShape = nullptr)
     {
         return replaceWithNewEquivalentShape(cx, obj, obj->lastProperty(), newShape);
     }
 
-    static MOZ_MUST_USE bool shadowingShapeChange(ExclusiveContext* cx, HandleNativeObject obj,
+    [[nodiscard]] static bool shadowingShapeChange(ExclusiveContext* cx, HandleNativeObject obj,
                                                   const Shape& shape);
     static bool clearFlag(ExclusiveContext* cx, HandleNativeObject obj, BaseShape::Flag flag);
 
@@ -790,7 +794,7 @@ class NativeObject : public ShapedObject
                         unsigned flags, ShapeTable::Entry* entry, bool allowDictionary,
                         const AutoKeepShapeTables& keep);
 
-    static MOZ_MUST_USE bool fillInAfterSwap(JSContext* cx, HandleNativeObject obj,
+    [[nodiscard]] static bool fillInAfterSwap(JSContext* cx, HandleNativeObject obj,
                                              const Vector<Value>& values, void* priv);
 
   public:
@@ -1073,6 +1077,10 @@ class NativeObject : public ShapedObject
             setDenseElement(index, val);
     }
 
+  private:
+    inline void addDenseElementType(ExclusiveContext* cx, uint32_t index, const Value& val);
+
+  public:
     inline void setDenseElementWithType(ExclusiveContext* cx, uint32_t index,
                                         const Value& val);
     inline void initDenseElementWithType(ExclusiveContext* cx, uint32_t index,
@@ -1081,7 +1089,9 @@ class NativeObject : public ShapedObject
     static inline void removeDenseElementForSparseIndex(ExclusiveContext* cx,
                                                         HandleNativeObject obj, uint32_t index);
 
-    inline Value getDenseOrTypedArrayElement(uint32_t idx);
+    template <AllowGC allowGC> inline bool 
+    getDenseOrTypedArrayElement(ExclusiveContext* cx, uint32_t idx,
+                                typename MaybeRooted<Value, allowGC>::MutableHandleType val);
 
     void copyDenseElements(uint32_t dstStart, const Value* src, uint32_t count) {
         MOZ_ASSERT(dstStart + count <= getDenseCapacity());
@@ -1398,6 +1408,18 @@ extern bool
 NativeDefineProperty(ExclusiveContext* cx, HandleNativeObject obj, PropertyName* name,
                      HandleValue value, JSGetterOp getter, JSSetterOp setter,
                      unsigned attrs);
+
+bool
+NativeDefineDataProperty(JSContext* cx, Handle<NativeObject*> obj, HandleId id, HandleValue value,
+                             unsigned attrs, ObjectOpResult& result);
+
+extern bool
+NativeDefineDataProperty(JSContext* cx, Handle<NativeObject*> obj, HandleId id,
+                         HandleValue value, unsigned attrs);
+
+extern bool
+NativeDefineDataProperty(JSContext* cx, Handle<NativeObject*> obj, PropertyName* name,
+                         HandleValue value, unsigned attrs);
 
 extern bool
 NativeHasProperty(JSContext* cx, HandleNativeObject obj, HandleId id, bool* foundp);

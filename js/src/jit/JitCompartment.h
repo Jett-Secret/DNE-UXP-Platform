@@ -215,14 +215,14 @@ class JitRuntime
   public:
     explicit JitRuntime(JSRuntime* rt);
     ~JitRuntime();
-    MOZ_MUST_USE bool initialize(JSContext* cx, js::AutoLockForExclusiveAccess& lock);
+    [[nodiscard]] bool initialize(JSContext* cx, js::AutoLockForExclusiveAccess& lock);
 
     uint8_t* allocateOsrTempData(size_t size);
     void freeOsrTempData();
 
     static void Mark(JSTracer* trc, js::AutoLockForExclusiveAccess& lock);
     static void MarkJitcodeGlobalTableUnconditionally(JSTracer* trc);
-    static MOZ_MUST_USE bool MarkJitcodeGlobalTableIteratively(JSTracer* trc);
+    [[nodiscard]] static bool MarkJitcodeGlobalTableIteratively(JSTracer* trc);
     static void SweepJitcodeGlobalTable(JSRuntime* rt);
 
     ExecutableAllocator& execAlloc() {
@@ -461,45 +461,19 @@ class JitCompartment
     JitCode* regExpSearcherStub_;
     JitCode* regExpTesterStub_;
 
-    mozilla::EnumeratedArray<SimdType, SimdType::Count, ReadBarrieredObject> simdTemplateObjects_;
-
     JitCode* generateStringConcatStub(JSContext* cx);
     JitCode* generateRegExpMatcherStub(JSContext* cx);
     JitCode* generateRegExpSearcherStub(JSContext* cx);
     JitCode* generateRegExpTesterStub(JSContext* cx);
 
   public:
-    JSObject* getSimdTemplateObjectFor(JSContext* cx, Handle<SimdTypeDescr*> descr) {
-        ReadBarrieredObject& tpl = simdTemplateObjects_[descr->type()];
-        if (!tpl)
-            tpl.set(TypedObject::createZeroed(cx, descr, 0, gc::TenuredHeap));
-        return tpl.get();
-    }
-
-    JSObject* maybeGetSimdTemplateObjectFor(SimdType type) const {
-        const ReadBarrieredObject& tpl = simdTemplateObjects_[type];
-
-        // This function is used by Eager Simd Unbox phase, so we cannot use the
-        // read barrier. For more information, see the comment above
-        // CodeGenerator::simdRefreshTemplatesDuringLink_ .
-        return tpl.unbarrieredGet();
-    }
-
-    // This function is used to call the read barrier, to mark the SIMD template
-    // type as used. This function can only be called from the main thread.
-    void registerSimdTemplateObjectFor(SimdType type) {
-        ReadBarrieredObject& tpl = simdTemplateObjects_[type];
-        MOZ_ASSERT(tpl.unbarrieredGet());
-        tpl.get();
-    }
-
     JitCode* getStubCode(uint32_t key) {
         ICStubCodeMap::AddPtr p = stubCodes_->lookupForAdd(key);
         if (p)
             return p->value();
         return nullptr;
     }
-    MOZ_MUST_USE bool putStubCode(JSContext* cx, uint32_t key, Handle<JitCode*> stubCode) {
+    [[nodiscard]] bool putStubCode(JSContext* cx, uint32_t key, Handle<JitCode*> stubCode) {
         MOZ_ASSERT(stubCode);
         if (!stubCodes_->putNew(key, stubCode.get())) {
             ReportOutOfMemory(cx);
@@ -516,7 +490,7 @@ class JitCompartment
         *stubInfo = nullptr;
         return nullptr;
     }
-    MOZ_MUST_USE bool putCacheIRStubCode(const CacheIRStubKey::Lookup& lookup, CacheIRStubKey& key,
+    [[nodiscard]] bool putCacheIRStubCode(const CacheIRStubKey::Lookup& lookup, CacheIRStubKey& key,
                                          JitCode* stubCode)
     {
         CacheIRStubCodeMap::AddPtr p = cacheIRStubCodes_->lookupForAdd(lookup);
@@ -554,10 +528,10 @@ class JitCompartment
     JitCompartment();
     ~JitCompartment();
 
-    MOZ_MUST_USE bool initialize(JSContext* cx);
+    [[nodiscard]] bool initialize(JSContext* cx);
 
     // Initialize code stubs only used by Ion, not Baseline.
-    MOZ_MUST_USE bool ensureIonStubsExist(JSContext* cx);
+    [[nodiscard]] bool ensureIonStubsExist(JSContext* cx);
 
     void mark(JSTracer* trc, JSCompartment* compartment);
     void sweep(FreeOp* fop, JSCompartment* compartment);
@@ -570,7 +544,7 @@ class JitCompartment
         return regExpMatcherStub_;
     }
 
-    MOZ_MUST_USE bool ensureRegExpMatcherStubExists(JSContext* cx) {
+    [[nodiscard]] bool ensureRegExpMatcherStubExists(JSContext* cx) {
         if (regExpMatcherStub_)
             return true;
         regExpMatcherStub_ = generateRegExpMatcherStub(cx);
@@ -581,7 +555,7 @@ class JitCompartment
         return regExpSearcherStub_;
     }
 
-    MOZ_MUST_USE bool ensureRegExpSearcherStubExists(JSContext* cx) {
+    [[nodiscard]] bool ensureRegExpSearcherStubExists(JSContext* cx) {
         if (regExpSearcherStub_)
             return true;
         regExpSearcherStub_ = generateRegExpSearcherStub(cx);
@@ -592,7 +566,7 @@ class JitCompartment
         return regExpTesterStub_;
     }
 
-    MOZ_MUST_USE bool ensureRegExpTesterStubExists(JSContext* cx) {
+    [[nodiscard]] bool ensureRegExpTesterStubExists(JSContext* cx) {
         if (regExpTesterStub_)
             return true;
         regExpTesterStub_ = generateRegExpTesterStub(cx);

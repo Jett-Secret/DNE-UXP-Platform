@@ -236,71 +236,132 @@
 #  define MOZ_ALLOCATOR
 #endif
 
-/**
- * MOZ_MUST_USE tells the compiler to emit a warning if a function's
- * return value is not used by the caller.
- *
- * Place this attribute at the very beginning of a function declaration. For
- * example, write
- *
- *   MOZ_MUST_USE int foo();
- *
- * or
- *
- *   MOZ_MUST_USE int foo() { return 42; }
- */
-#if defined(__GNUC__) || defined(__clang__)
-#  define MOZ_MUST_USE __attribute__ ((warn_unused_result))
-#else
-#  define MOZ_MUST_USE
-#endif
-
 #ifdef __cplusplus
 
-/**
- * MOZ_FALLTHROUGH is an annotation to suppress compiler warnings about switch
- * cases that fall through without a break or return statement. MOZ_FALLTHROUGH
- * is only needed on cases that have code.
- *
- * MOZ_FALLTHROUGH_ASSERT is an annotation to suppress compiler warnings about
- * switch cases that MOZ_ASSERT(false) (or its alias MOZ_ASSERT_UNREACHABLE) in
- * debug builds, but intentionally fall through in release builds. See comment
- * in Assertions.h for more details.
- *
- * switch (foo) {
- *   case 1: // These cases have no code. No fallthrough annotations are needed.
- *   case 2:
- *   case 3: // This case has code, so a fallthrough annotation is needed!
- *     foo++;
- *     MOZ_FALLTHROUGH;
- *   case 4:
- *     return foo;
- *
- *   default:
- *     // This case asserts in debug builds, falls through in release.
- *     MOZ_FALLTHROUGH_ASSERT("Unexpected foo value?!");
- *   case 5:
- *     return 5;
- * }
+/*
+ * MOZ_ASAN_BLACKLIST is a macro to tell AddressSanitizer (a compile-time
+ * instrumentation shipped with Clang and GCC) to not instrument the annotated
+ * function. Furthermore, it will prevent the compiler from inlining the
+ * function because inlining currently breaks the blacklisting mechanism of
+ * AddressSanitizer.
  */
-#ifndef __has_cpp_attribute
-#  define __has_cpp_attribute(x) 0
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define MOZ_HAVE_ASAN_BLACKLIST
+#  endif
+#elif defined(__GNUC__)
+#  if defined(__SANITIZE_ADDRESS__)
+#    define MOZ_HAVE_ASAN_BLACKLIST
+#  endif
 #endif
 
-#if __has_cpp_attribute(clang::fallthrough)
-#  define MOZ_FALLTHROUGH [[clang::fallthrough]]
-#elif __has_cpp_attribute(gnu::fallthrough)
-#  define MOZ_FALLTHROUGH [[gnu::fallthrough]]
-#elif defined(_MSC_VER)
-   /*
-    * MSVC's __fallthrough annotations are checked by /analyze (Code Analysis):
-    * https://msdn.microsoft.com/en-us/library/ms235402%28VS.80%29.aspx
-    */
-#  include <sal.h>
-#  define MOZ_FALLTHROUGH __fallthrough
+#if defined(MOZ_HAVE_ASAN_BLACKLIST)
+#  define MOZ_ASAN_BLACKLIST \
+    MOZ_NEVER_INLINE __attribute__((no_sanitize_address))
 #else
-#  define MOZ_FALLTHROUGH /* FALLTHROUGH */
+#  define MOZ_ASAN_BLACKLIST /* nothing */
 #endif
+
+/*
+ * MOZ_TSAN_BLACKLIST is a macro to tell ThreadSanitizer (a compile-time
+ * instrumentation shipped with Clang) to not instrument the annotated function.
+ * Furthermore, it will prevent the compiler from inlining the function because
+ * inlining currently breaks the blacklisting mechanism of ThreadSanitizer.
+ */
+#if defined(__has_feature)
+#  if __has_feature(thread_sanitizer)
+#    define MOZ_TSAN_BLACKLIST \
+      MOZ_NEVER_INLINE __attribute__((no_sanitize_thread))
+#  else
+#    define MOZ_TSAN_BLACKLIST /* nothing */
+#  endif
+#else
+#  define MOZ_TSAN_BLACKLIST /* nothing */
+#endif
+
+#if defined(__has_attribute)
+#  if __has_attribute(no_sanitize)
+#    define MOZ_HAVE_NO_SANITIZE_ATTR
+#  endif
+#endif
+
+#ifdef __clang__
+#  ifdef MOZ_HAVE_NO_SANITIZE_ATTR
+#    define MOZ_HAVE_UNSIGNED_OVERFLOW_SANITIZE_ATTR
+#    define MOZ_HAVE_SIGNED_OVERFLOW_SANITIZE_ATTR
+#  endif
+#endif
+
+/*
+ * MOZ_NO_SANITIZE_UNSIGNED_OVERFLOW disables *un*signed integer overflow
+ * checking on the function it annotates, in builds configured to perform it.
+ * (Currently this is only Clang using -fsanitize=unsigned-integer-overflow, or
+ * via --enable-unsigned-overflow-sanitizer in Mozilla's build system.)  It has
+ * no effect in other builds.
+ *
+ * Place this attribute at the very beginning of a function declaration.
+ *
+ * Unsigned integer overflow isn't *necessarily* a bug.  It's well-defined in
+ * C/C++, and code may reasonably depend upon it.  For example,
+ *
+ *   MOZ_NO_SANITIZE_UNSIGNED_OVERFLOW inline bool
+ *   IsDecimal(char aChar)
+ *   {
+ *     // For chars less than '0', unsigned integer underflow occurs, to a value
+ *     // much greater than 10, so the overall test is false.
+ *     // For chars greater than '0', no overflow occurs, and only '0' to '9'
+ *     // pass the overall test.
+ *     return static_cast<unsigned int>(aChar) - '0' < 10;
+ *   }
+ *
+ * But even well-defined unsigned overflow often causes bugs when it occurs, so
+ * it should be restricted to functions annotated with this attribute.
+ *
+ * The compiler instrumentation to detect unsigned integer overflow has costs
+ * both at compile time and at runtime.  Functions that are repeatedly inlined
+ * at compile time will also implicitly inline the necessary instrumentation,
+ * increasing compile time.  Similarly, frequently-executed functions that
+ * require large amounts of instrumentation will also notice significant runtime
+ * slowdown to execute that instrumentation.  Use this attribute to eliminate
+ * those costs -- but only after carefully verifying that no overflow can occur.
+ */
+#ifdef MOZ_HAVE_UNSIGNED_OVERFLOW_SANITIZE_ATTR
+#  define MOZ_NO_SANITIZE_UNSIGNED_OVERFLOW \
+    __attribute__((no_sanitize("unsigned-integer-overflow")))
+#else
+#  define MOZ_NO_SANITIZE_UNSIGNED_OVERFLOW /* nothing */
+#endif
+
+/*
+ * MOZ_NO_SANITIZE_SIGNED_OVERFLOW disables *signed* integer overflow checking
+ * on the function it annotates, in builds configured to perform it.  (Currently
+ * this is only Clang using -fsanitize=signed-integer-overflow, or via
+ * --enable-signed-overflow-sanitizer in Mozilla's build system.  GCC support
+ * will probably be added in the future.)  It has no effect in other builds.
+ *
+ * Place this attribute at the very beginning of a function declaration.
+ *
+ * Signed integer overflow is undefined behavior in C/C++: *anything* can happen
+ * when it occurs.  *Maybe* wraparound behavior will occur, but maybe also the
+ * compiler will assume no overflow happens and will adversely optimize the rest
+ * of your code.  Code that contains signed integer overflow needs to be fixed.
+ *
+ * The compiler instrumentation to detect signed integer overflow has costs both
+ * at compile time and at runtime.  Functions that are repeatedly inlined at
+ * compile time will also implicitly inline the necessary instrumentation,
+ * increasing compile time.  Similarly, frequently-executed functions that
+ * require large amounts of instrumentation will also notice significant runtime
+ * slowdown to execute that instrumentation.  Use this attribute to eliminate
+ * those costs -- but only after carefully verifying that no overflow can occur.
+ */
+#ifdef MOZ_HAVE_SIGNED_OVERFLOW_SANITIZE_ATTR
+#  define MOZ_NO_SANITIZE_SIGNED_OVERFLOW \
+    __attribute__((no_sanitize("signed-integer-overflow")))
+#else
+#  define MOZ_NO_SANITIZE_SIGNED_OVERFLOW /* nothing */
+#endif
+
+#undef MOZ_HAVE_NO_SANITIZE_ATTR
 
 /*
  * The following macros are attributes that support the static analysis plugin

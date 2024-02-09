@@ -695,6 +695,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     Condition testUndefined(Condition cond, const ValueOperand& value);
     Condition testString(Condition cond, const ValueOperand& value);
     Condition testSymbol(Condition cond, const ValueOperand& value);
+    Condition testBigInt(Condition cond, const ValueOperand& value);
     Condition testObject(Condition cond, const ValueOperand& value);
     Condition testNumber(Condition cond, const ValueOperand& value);
     Condition testMagic(Condition cond, const ValueOperand& value);
@@ -708,6 +709,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     Condition testUndefined(Condition cond, Register tag);
     Condition testString(Condition cond, Register tag);
     Condition testSymbol(Condition cond, Register tag);
+    Condition testBigInt(Condition cond, Register tag);
     Condition testObject(Condition cond, Register tag);
     Condition testDouble(Condition cond, Register tag);
     Condition testNumber(Condition cond, Register tag);
@@ -723,6 +725,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     Condition testUndefined(Condition cond, const Address& address);
     Condition testString(Condition cond, const Address& address);
     Condition testSymbol(Condition cond, const Address& address);
+    Condition testBigInt(Condition cond, const Address& address);
     Condition testObject(Condition cond, const Address& address);
     Condition testNumber(Condition cond, const Address& address);
 
@@ -731,6 +734,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     Condition testBoolean(Condition cond, const BaseIndex& src);
     Condition testString(Condition cond, const BaseIndex& src);
     Condition testSymbol(Condition cond, const BaseIndex& src);
+    Condition testBigInt(Condition cond, const BaseIndex& src);
     Condition testInt32(Condition cond, const BaseIndex& src);
     Condition testObject(Condition cond, const BaseIndex& src);
     Condition testDouble(Condition cond, const BaseIndex& src);
@@ -749,6 +753,8 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void unboxString(const Address& src, Register dest) { unboxNonDouble(src, dest); }
     void unboxSymbol(const ValueOperand& src, Register dest) { unboxNonDouble(src, dest); }
     void unboxSymbol(const Address& src, Register dest) { unboxNonDouble(src, dest); }
+    void unboxBigInt(const ValueOperand& src, Register dest) { unboxNonDouble(src, dest); }
+    void unboxBigInt(const Address& src, Register dest) { unboxNonDouble(src, dest); }
     void unboxObject(const ValueOperand& src, Register dest) { unboxNonDouble(src, dest); }
     void unboxObject(const Address& src, Register dest) { unboxNonDouble(src, dest); }
     void unboxObject(const BaseIndex& src, Register dest) { unboxNonDouble(src, dest); }
@@ -797,6 +803,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     Condition testBooleanTruthy(bool truthy, const ValueOperand& operand);
     Condition testDoubleTruthy(bool truthy, FloatRegister reg);
     Condition testStringTruthy(bool truthy, const ValueOperand& value);
+    Condition testBigIntTruthy(bool truthy, const ValueOperand& value);
 
     void boolValueToFloat32(const ValueOperand& operand, FloatRegister dest);
     void int32ValueToFloat32(const ValueOperand& operand, FloatRegister dest);
@@ -1038,34 +1045,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void loadPtr(wasm::SymbolicAddress address, Register dest);
 
     void loadPrivate(const Address& address, Register dest);
-
-    void loadInt32x1(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x1(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x2(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x2(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x3(const Address& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadInt32x3(const BaseIndex& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x1(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x1(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x2(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x2(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x3(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
-    void storeInt32x3(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
-    void loadAlignedSimd128Int(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeAlignedSimd128Int(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
-    void loadUnalignedSimd128Int(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadUnalignedSimd128Int(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeUnalignedSimd128Int(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
-    void storeUnalignedSimd128Int(FloatRegister src, BaseIndex addr) { MOZ_CRASH("NYI"); }
-
-    void loadFloat32x3(const Address& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadFloat32x3(const BaseIndex& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadAlignedSimd128Float(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeAlignedSimd128Float(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
-    void loadUnalignedSimd128Float(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadUnalignedSimd128Float(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeUnalignedSimd128Float(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
-    void storeUnalignedSimd128Float(FloatRegister src, BaseIndex addr) { MOZ_CRASH("NYI"); }
 
     void loadDouble(const Address& addr, FloatRegister dest);
     void loadDouble(const BaseIndex& src, FloatRegister dest);

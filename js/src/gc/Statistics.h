@@ -62,6 +62,7 @@ enum Phase : uint8_t {
     PHASE_SWEEP_STRING,
     PHASE_SWEEP_SCRIPT,
     PHASE_SWEEP_SCOPE,
+    PHASE_SWEEP_REGEXP_SHARED,
     PHASE_SWEEP_SHAPE,
     PHASE_SWEEP_JITCODE,
     PHASE_FINALIZE_END,
@@ -183,7 +184,7 @@ struct Statistics
     /* Create a convenient type for referring to tables of phase times. */
     using PhaseTimeTable = int64_t[NumTimingArrays][PHASE_LIMIT];
 
-    static MOZ_MUST_USE bool initialize();
+    [[nodiscard]] static bool initialize();
 
     explicit Statistics(JSRuntime* rt);
     ~Statistics();
@@ -212,8 +213,8 @@ struct Statistics
                     SliceBudget budget, JS::gcreason::Reason reason);
     void endSlice();
 
-    MOZ_MUST_USE bool startTimingMutator();
-    MOZ_MUST_USE bool stopTimingMutator(double& mutator_ms, double& gc_ms);
+    [[nodiscard]] bool startTimingMutator();
+    [[nodiscard]] bool stopTimingMutator(double& mutator_ms, double& gc_ms);
 
     // Note when we sweep a zone or compartment.
     void sweptZone() { ++zoneStats.sweptZoneCount; }

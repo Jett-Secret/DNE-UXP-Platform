@@ -355,7 +355,11 @@ nsFilePicker::ShowFilePicker(const nsString& aInitialDir)
 
   // default extension to append to new files
   if (!mDefaultExtension.IsEmpty()) {
-    hr = dialog->SetDefaultExtension(mDefaultExtension.get());
+    // We don't want environment variables expanded in the extension either.
+    nsAutoString sanitizedExtension(mDefaultExtension);
+    sanitizedExtension.ReplaceChar('%', '_');
+
+    hr = dialog->SetDefaultExtension(sanitizedExtension.get());
     if (FAILED(hr)) {
       return false;
     }
@@ -640,7 +644,9 @@ nsFilePicker::InitNative(nsIWidget *aParent,
 NS_IMETHODIMP
 nsFilePicker::AppendFilter(const nsAString& aTitle, const nsAString& aFilter)
 {
-  mComFilterList.Append(aTitle, aFilter);
+  nsAutoString sanitizedFilter(aFilter);
+  sanitizedFilter.ReplaceChar('%', '_');
+  mComFilterList.Append(aTitle, sanitizedFilter);
   return NS_OK;
 }
 

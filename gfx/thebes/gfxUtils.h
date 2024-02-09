@@ -43,6 +43,7 @@ public:
     typedef mozilla::gfx::SurfaceFormat SurfaceFormat;
     typedef mozilla::image::ImageRegion ImageRegion;
     typedef mozilla::YUVColorSpace YUVColorSpace;
+    typedef mozilla::ColorRange ColorRange;
 
     /*
      * Premultiply or Unpremultiply aSourceSurface, writing the result
@@ -127,9 +128,10 @@ public:
 
     /**
      * Return the smallest power of kScaleResolution (2) greater than or equal to
-     * aVal.
+     * aVal. If aRoundDown is specified, the power of 2 will be less than
+     * or equal to aVal.
      */
-    static gfxFloat ClampToScaleFactor(gfxFloat aVal);
+    static gfxFloat ClampToScaleFactor(gfxFloat aVal, bool aRoundDown = false);
 
     /**
      * Clears surface to aColor (which defaults to transparent black).
@@ -139,9 +141,11 @@ public:
     /**
      * Get array of yuv to rgb conversion matrix.
      */
-    static float* Get4x3YuvColorMatrix(YUVColorSpace aYUVColorSpace);
+    static const float* YuvToRgbMatrix4x4XRowMajor(YUVColorSpace aYUVColorSpace,
+                                                   ColorRange aColorRange);
 
-    static float* Get3x3YuvColorMatrix(YUVColorSpace aYUVColorSpace);
+    static const float* YuvToRgbMatrix4x4ColumnMajor(YUVColorSpace aYUVColorSpace,
+                                                     ColorRange aColorRange);
 
     /**
      * Creates a copy of aSurface, but having the SurfaceFormat aFormat.

@@ -1,4 +1,3 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
@@ -292,6 +291,7 @@ TEST(Layers, TextureYCbCrSerialization) {
 
   RefPtr<TextureClient> client = TextureClient::CreateForYCbCr(imageBridge, clientData.mYSize, clientData.mCbCrSize,
                                                                StereoMode::MONO, YUVColorSpace::BT601,
+                                                               ColorRange::LIMITED,
                                                                TextureFlags::DEALLOCATE_CLIENT);
 
   TestTextureClientYCbCr(client, clientData);

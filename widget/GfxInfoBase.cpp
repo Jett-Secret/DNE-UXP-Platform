@@ -1,4 +1,3 @@
-/* vim: se cin sw=2 ts=2 et : */
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
@@ -286,6 +285,8 @@ BlacklistOSToOperatingSystem(const nsAString& os)
     return OperatingSystem::OSX12_0;
   else if (os.EqualsLiteral("Darwin 22"))
     return OperatingSystem::OSX13_0;
+  else if (os.EqualsLiteral("Darwin 23"))
+    return OperatingSystem::OSX14_0;
   // For historical reasons, "All" in blocklist means "All Windows"
   else if (os.EqualsLiteral("All"))
     return OperatingSystem::Windows;
@@ -985,7 +986,7 @@ GfxInfoBase::EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo)
           } else {
             RemovePrefForDriverVersion();
           }
-          MOZ_FALLTHROUGH;
+          [[fallthrough]];
 
         case nsIGfxInfo::FEATURE_BLOCKED_MISMATCHED_VERSION:
         case nsIGfxInfo::FEATURE_BLOCKED_DEVICE:

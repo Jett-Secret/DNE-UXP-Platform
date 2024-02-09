@@ -132,6 +132,7 @@ class nsIContentParent;
 class TabChild;
 class Selection;
 class TabParent;
+struct StructuredSerializeOptions;
 } // namespace dom
 
 namespace ipc {
@@ -280,12 +281,26 @@ public:
     const nsINode* aPossibleDescendant, const nsINode* aPossibleAncestor);
 
   /**
+   * Similar to above, but does special case only ShadowRoot,
+   * not HTMLTemplateElement.
+   */
+  static bool ContentIsShadowIncludingDescendantOf(
+    const nsINode* aPossibleDescendant, const nsINode* aPossibleAncestor);
+
+  /**
    * Similar to ContentIsDescendantOf except it crosses document boundaries,
    * this function uses ancestor/descendant relations in the composed document
    * (see shadow DOM spec).
    */
   static bool ContentIsCrossDocDescendantOf(nsINode* aPossibleDescendant,
                                               nsINode* aPossibleAncestor);
+
+  /**
+   * Retarget an object A against an object B
+   * @see https://dom.spec.whatwg.org/#retarget
+   */
+  static nsINode*
+  Retarget(nsINode* aTargetA, nsINode* aTargetB);
 
   /*
    * This method fills the |aArray| with all ancestor nodes of |aNode|
@@ -318,12 +333,18 @@ public:
                                     nsIDOMNode** aCommonAncestor);
 
   /**
-   * Returns the common ancestor, if any, for two nodes. Returns null if the
-   * nodes are disconnected.
+   * Returns the common ancestor, if any, for two nodes.
+   * Returns null if the nodes are disconnected.
    */
-  static nsINode* GetCommonAncestor(nsINode* aNode1,
-                                    nsINode* aNode2);
+  static nsINode* GetCommonAncestor(nsINode* aNode1, nsINode* aNode2);
 
+  /**
+   * Returns the common flattened tree ancestor, if any, for two given content
+   * nodes.
+   */
+  static nsIContent* GetCommonFlattenedTreeAncestor(nsIContent* aContent1,
+                                                    nsIContent* aContent2);
+ 
   /**
    * Returns the common ancestor under interactive content, if any.
    * If neither one has interactive content as ancestor, common ancestor will be
@@ -995,6 +1016,10 @@ public:
 
   static bool PrefetchEnabled(nsIDocShell* aDocShell);
 
+  static void ExtractErrorValues(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                                 nsACString& aSourceSpecOut, uint32_t *aLineOut,
+                                 uint32_t *aColumnOut, nsString& aMessageOut);
+
   static nsresult CalculateBufferSizeForImage(const uint32_t& aStride,
                                               const mozilla::gfx::IntSize& aImageSize,
                                               const mozilla::gfx::SurfaceFormat& aFormat,
@@ -1489,9 +1514,10 @@ public:
    * @param aResult the result. Out param.
    * @return false on out of memory errors, true otherwise.
    */
-  MOZ_MUST_USE
-  static bool GetNodeTextContent(nsINode* aNode, bool aDeep,
-                                 nsAString& aResult, const mozilla::fallible_t&);
+  [[nodiscard]] static bool GetNodeTextContent(nsINode* aNode,
+                                               bool aDeep,
+                                               nsAString& aResult,
+                                               const mozilla::fallible_t&);
 
   static void GetNodeTextContent(nsINode* aNode, bool aDeep,
                                  nsAString& aResult);
@@ -1747,17 +1773,17 @@ public:
    */
   static void RunInStableState(already_AddRefed<nsIRunnable> aRunnable);
 
-  /* Add a "synchronous section", in the form of an nsIRunnable run once the
-   * event loop has reached a "metastable state". |aRunnable| must not cause any
-   * queued events to be processed (i.e. must not spin the event loop).
-   * We've reached a metastable state when the currently executing task or
-   * microtask has finished.  This is not specced at this time.
-   * In practice this runs aRunnable once the currently executing task or
-   * microtask finishes.  If called multiple times per microtask, all the
-   * runnables will be executed, in the order in which RunInMetastableState()
-   * was called
+  /* Add a pending IDBTransaction to be cleaned up at the end of performing a
+   * microtask checkpoint.
+   * See the step of "Cleanup Indexed Database Transactions" in
+   * https://html.spec.whatwg.org/multipage/webappapis.html#perform-a-microtask-checkpoint
    */
-  static void RunInMetastableState(already_AddRefed<nsIRunnable> aRunnable);
+  static void AddPendingIDBTransaction(already_AddRefed<nsIRunnable> aTransaction);
+
+  /**
+   * Returns true if we are doing StableState/MetastableState.
+   */
+  static bool IsInStableOrMetaStableState();
 
   /* Process viewport META data. This gives us information for the scale
    * and zoom of a page on mobile devices. We stick the information in
@@ -1850,28 +1876,29 @@ public:
    */
   static bool CanAccessNativeAnon();
 
-  MOZ_MUST_USE
-  static nsresult WrapNative(JSContext *cx, nsISupports *native,
-                             const nsIID* aIID, JS::MutableHandle<JS::Value> vp,
-                             bool aAllowWrapping = true)
+  [[nodiscard]] static nsresult WrapNative(JSContext* cx,
+                                           nsISupports* native,
+                                           const nsIID* aIID,
+                                           JS::MutableHandle<JS::Value> vp,
+                                           bool aAllowWrapping = true)
   {
     return WrapNative(cx, native, nullptr, aIID, vp, aAllowWrapping);
   }
 
   // Same as the WrapNative above, but use this one if aIID is nsISupports' IID.
-  MOZ_MUST_USE
-  static nsresult WrapNative(JSContext *cx, nsISupports *native,
-                             JS::MutableHandle<JS::Value> vp,
-                             bool aAllowWrapping = true)
+  [[nodiscard]] static nsresult WrapNative(JSContext* cx,
+                                           nsISupports* native,
+                                           JS::MutableHandle<JS::Value> vp,
+                                           bool aAllowWrapping = true)
   {
     return WrapNative(cx, native, nullptr, nullptr, vp, aAllowWrapping);
   }
 
-  MOZ_MUST_USE
-  static nsresult WrapNative(JSContext *cx, nsISupports *native,
-                             nsWrapperCache *cache,
-                             JS::MutableHandle<JS::Value> vp,
-                             bool aAllowWrapping = true)
+  [[nodiscard]] static nsresult WrapNative(JSContext* cx,
+                                           nsISupports* native,
+                                           nsWrapperCache* cache,
+                                           JS::MutableHandle<JS::Value> vp,
+                                           bool aAllowWrapping = true)
   {
     return WrapNative(cx, native, cache, nullptr, vp, aAllowWrapping);
   }
@@ -1895,9 +1922,8 @@ public:
    * @param aString the string to convert the newlines inside [in/out]
    */
   static void PlatformToDOMLineBreaks(nsString &aString);
-  MOZ_MUST_USE
-  static bool PlatformToDOMLineBreaks(nsString &aString,
-                                      const mozilla::fallible_t&);
+  [[nodiscard]] static bool PlatformToDOMLineBreaks(nsString &aString,
+                                                    const mozilla::fallible_t&);
 
   /**
    * Populates aResultString with the contents of the string-buffer aBuf, up
@@ -2664,6 +2690,8 @@ public:
   static mozilla::net::ReferrerPolicy GetReferrerPolicyFromHeader(const nsAString& aHeader);
 
   static bool PushEnabled(JSContext* aCx, JSObject* aObj);
+  
+  static bool StreamsEnabled(JSContext* aCx, JSObject* aObj);
 
   static bool IsNonSubresourceRequest(nsIChannel* aChannel);
 
@@ -2797,6 +2825,23 @@ public:
 
   static bool
   IsCustomElementsEnabled() { return sIsCustomElementsEnabled; }
+
+  static nsresult
+  CreateJSValueFromSequenceOfObject(JSContext* aCx,
+                                    const mozilla::dom::Sequence<JSObject*>& aTransfer,
+                                    JS::MutableHandle<JS::Value> aValue);
+
+  /**
+   * This implements the structured cloning algorithm as described by
+   * https://html.spec.whatwg.org/#structured-cloning.
+   */
+  static void
+  StructuredClone(JSContext* aCx,
+                  nsIGlobalObject* aGlobal,
+                  JS::Handle<JS::Value> aValue,
+                  const mozilla::dom::StructuredSerializeOptions& aOptions,
+                  JS::MutableHandle<JS::Value> aRv,
+                  mozilla::ErrorResult& aError);
 
 private:
   static bool InitializeEventTable();

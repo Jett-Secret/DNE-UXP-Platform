@@ -495,6 +495,7 @@ public:
         IDX_COLUMNNUMBER            ,
         IDX_STACK                   ,
         IDX_MESSAGE                 ,
+        IDX_ERRORS                  ,
         IDX_LASTINDEX               ,
         IDX_TOTAL_COUNT // just a count of the above
     };
@@ -2878,6 +2879,7 @@ struct GlobalProperties {
     bool crypto : 1;
     bool rtcIdentityProvider : 1;
     bool fetch : 1;
+    bool structuredClone : 1;
     bool caches : 1;
     bool fileReader: 1;
 private:

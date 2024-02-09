@@ -95,6 +95,22 @@ JS_PCToLineNumber(JSScript* script, jsbytecode* pc, unsigned* columnp = nullptr)
 extern JS_FRIEND_API(bool)
 JS_IsDeadWrapper(JSObject* obj);
 
+namespace js {
+
+/**
+ * Get the script private value associated with an object, if any.
+ *
+ * The private value is set with SetScriptPrivate() or SetModulePrivate() and is
+ * internally stored on the relevant ScriptSourceObject.
+ *
+ * This is used by the cycle collector to trace through
+ * ScriptSourceObjects. This allows private values to contain an nsISupports
+ * pointer and hence support references to cycle collected C++ objects.
+ */
+JS_FRIEND_API(JS::Value) MaybeGetScriptPrivate(JSObject* object);
+
+}  // namespace js
+
 /*
  * Used by the cycle collector to trace through a shape or object group and
  * all cycle-participating data it reaches, using bounded stack space.
@@ -643,6 +659,9 @@ GetPrototypeNoProxy(JSObject* obj);
 JS_FRIEND_API(void)
 AssertSameCompartment(JSContext* cx, JSObject* obj);
 
+JS_FRIEND_API(void)
+AssertSameCompartment(JSContext* cx, JS::HandleValue v);
+
 #ifdef JS_DEBUG
 JS_FRIEND_API(void)
 AssertSameCompartment(JSObject* objA, JSObject* objB);
@@ -1114,9 +1133,9 @@ extern JS_FRIEND_API(unsigned)
 GetEnterCompartmentDepth(JSContext* cx);
 #endif
 
-class RegExpGuard;
 extern JS_FRIEND_API(bool)
-RegExpToSharedNonInline(JSContext* cx, JS::HandleObject regexp, RegExpGuard* shared);
+RegExpToSharedNonInline(JSContext* cx, JS::HandleObject regexp,
+                        JS::MutableHandle<RegExpShared*> shared);
 
 /* Implemented in jswrapper.cpp. */
 typedef enum NukeReferencesToWindow {
@@ -1307,11 +1326,11 @@ class MOZ_STACK_CLASS JS_FRIEND_API(AutoStableStringChars)
       : s_(cx), state_(Uninitialized)
     {}
 
-    MOZ_MUST_USE
+    [[nodiscard]]
     bool init(JSContext* cx, JSString* s);
 
     /* Like init(), but Latin1 chars are inflated to TwoByte. */
-    MOZ_MUST_USE
+    [[nodiscard]]
     bool initTwoByte(JSContext* cx, JSString* s);
 
     bool isLatin1() const { return state_ == Latin1; }
@@ -1448,12 +1467,15 @@ GetSCOffset(JSStructuredCloneWriter* writer);
 
 namespace Scalar {
 
-/**
- * Scalar types that can appear in typed arrays and typed objects.  The enum
- * values must to be kept in sync with the JS_SCALARTYPEREPR_ constants, as
- * well as the TypedArrayObject::classes and TypedArrayObject::protoClasses
- * definitions.
- */
+// Scalar types that can appear in typed arrays and typed objects.
+// The enum values must be kept in sync with:
+//  * the JS_SCALARTYPEREPR constants
+//  * the TYPEDARRAY_KIND constants
+//  * the SCTAG_TYPED_ARRAY constants
+//  * JS_FOR_EACH_TYPEDARRAY
+//  * JS_FOR_PROTOTYPES_
+//  * JS_FOR_EACH_UNIQUE_SCALAR_TYPE_REPR_CTYPE
+//  * JIT compilation
 enum Type {
     Int8 = 0,
     Uint8,
@@ -1470,16 +1492,15 @@ enum Type {
      */
     Uint8Clamped,
 
+    BigInt64,
+    BigUint64,
+
     /**
      * Types that don't have their own TypedArray equivalent, for now.
      */
     MaxTypedArrayViewType,
 
     Int64,
-    Float32x4,
-    Int8x16,
-    Int16x8,
-    Int32x4
 };
 
 static inline size_t
@@ -1499,12 +1520,9 @@ byteSize(Type atype)
         return 4;
       case Int64:
       case Float64:
+      case BigInt64:
+      case BigUint64:
         return 8;
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
-      case Float32x4:
-        return 16;
       default:
         MOZ_CRASH("invalid scalar type");
     }
@@ -1517,9 +1535,7 @@ isSignedIntType(Type atype) {
       case Int16:
       case Int32:
       case Int64:
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
+      case BigInt64:
         return true;
       case Uint8:
       case Uint8Clamped:
@@ -1527,64 +1543,35 @@ isSignedIntType(Type atype) {
       case Uint32:
       case Float32:
       case Float64:
-      case Float32x4:
+      case BigUint64:
         return false;
       default:
         MOZ_CRASH("invalid scalar type");
     }
 }
 
-static inline bool
-isSimdType(Type atype) {
+static inline bool isBigIntType(Type atype) {
     switch (atype) {
+      case BigInt64:
+      case BigUint64:
+        return true;
       case Int8:
+      case Int16:
+      case Int32:
+      case Int64:
       case Uint8:
       case Uint8Clamped:
-      case Int16:
       case Uint16:
-      case Int32:
       case Uint32:
-      case Int64:
       case Float32:
       case Float64:
         return false;
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
-      case Float32x4:
-        return true;
       case MaxTypedArrayViewType:
         break;
-    }
-    MOZ_CRASH("invalid scalar type");
+  }
+  MOZ_CRASH("invalid scalar type");
 }
-
-static inline size_t
-scalarByteSize(Type atype) {
-    switch (atype) {
-      case Int8x16:
-        return 1;
-      case Int16x8:
-        return 2;
-      case Int32x4:
-      case Float32x4:
-        return 4;
-      case Int8:
-      case Uint8:
-      case Uint8Clamped:
-      case Int16:
-      case Uint16:
-      case Int32:
-      case Uint32:
-      case Int64:
-      case Float32:
-      case Float64:
-      case MaxTypedArrayViewType:
-        break;
-    }
-    MOZ_CRASH("invalid simd type");
-}
-
+ 
 } /* namespace Scalar */
 } /* namespace js */
 
@@ -1608,6 +1595,10 @@ extern JS_FRIEND_API(JSObject*)
 JS_NewInt32Array(JSContext* cx, uint32_t nelements);
 extern JS_FRIEND_API(JSObject*)
 JS_NewUint32Array(JSContext* cx, uint32_t nelements);
+extern JS_FRIEND_API(JSObject*)
+JS_NewBigInt64Array(JSContext* cx, int32_t nelements);
+extern JS_FRIEND_API(JSObject*)
+JS_NewBigUint64Array(JSContext* cx, int32_t nelements);
 extern JS_FRIEND_API(JSObject*)
 JS_NewFloat32Array(JSContext* cx, uint32_t nelements);
 extern JS_FRIEND_API(JSObject*)
@@ -1635,6 +1626,10 @@ extern JS_FRIEND_API(JSObject*)
 JS_NewInt32ArrayFromArray(JSContext* cx, JS::HandleObject array);
 extern JS_FRIEND_API(JSObject*)
 JS_NewUint32ArrayFromArray(JSContext* cx, JS::HandleObject array);
+extern JS_FRIEND_API(JSObject*)
+JS_NewBigInt64ArrayWithBuffer(JSContext* cx, JS::HandleObject array);
+extern JS_FRIEND_API(JSObject*)
+JS_NewBigUint64ArrayWithBuffer(JSContext* cx, JS::HandleObject array);
 extern JS_FRIEND_API(JSObject*)
 JS_NewFloat32ArrayFromArray(JSContext* cx, JS::HandleObject array);
 extern JS_FRIEND_API(JSObject*)
@@ -1668,6 +1663,12 @@ JS_NewInt32ArrayWithBuffer(JSContext* cx, JS::HandleObject arrayBuffer,
 extern JS_FRIEND_API(JSObject*)
 JS_NewUint32ArrayWithBuffer(JSContext* cx, JS::HandleObject arrayBuffer,
                             uint32_t byteOffset, int32_t length);
+extern JS_FRIEND_API(JSObject*)
+JS_NewBigInt64ArrayWithBuffer(JSContext* cx, JS::HandleObject arrayBuffer,
+                              uint32_t byteOffset, int32_t length);
+extern JS_FRIEND_API(JSObject*)
+JS_NewBigUint64ArrayWithBuffer(JSContext* cx, JS::HandleObject arrayBuffer,
+                              uint32_t byteOffset, int32_t length);
 extern JS_FRIEND_API(JSObject*)
 JS_NewFloat32ArrayWithBuffer(JSContext* cx, JS::HandleObject arrayBuffer,
                              uint32_t byteOffset, int32_t length);
@@ -1728,6 +1729,10 @@ JS_IsInt32Array(JSObject* obj);
 extern JS_FRIEND_API(bool)
 JS_IsUint32Array(JSObject* obj);
 extern JS_FRIEND_API(bool)
+JS_IsBigInt64Array(JSObject* obj);
+extern JS_FRIEND_API(bool)
+JS_IsBigUint64Array(JSObject* obj);
+extern JS_FRIEND_API(bool)
 JS_IsFloat32Array(JSObject* obj);
 extern JS_FRIEND_API(bool)
 JS_IsFloat64Array(JSObject* obj);
@@ -1765,6 +1770,10 @@ UnwrapInt32Array(JSObject* obj);
 extern JS_FRIEND_API(JSObject*)
 UnwrapUint32Array(JSObject* obj);
 extern JS_FRIEND_API(JSObject*)
+UnwrapBigInt64Array(JSObject* obj);
+extern JS_FRIEND_API(JSObject*)
+UnwrapBigUint64Array(JSObject* obj);
+extern JS_FRIEND_API(JSObject*)
 UnwrapFloat32Array(JSObject* obj);
 extern JS_FRIEND_API(JSObject*)
 UnwrapFloat64Array(JSObject* obj);
@@ -1778,6 +1787,9 @@ UnwrapArrayBufferView(JSObject* obj);
 extern JS_FRIEND_API(JSObject*)
 UnwrapSharedArrayBuffer(JSObject* obj);
 
+extern JS_FRIEND_API(JSObject*)
+UnwrapReadableStream(JSObject* obj);
+
 
 namespace detail {
 
@@ -1788,6 +1800,8 @@ extern JS_FRIEND_DATA(const Class* const) Int16ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Uint16ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Int32ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Uint32ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) BigInt64ArrayClassPtr;
+extern JS_FRIEND_DATA(const Class* const) BigUint64ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Float32ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Float64ArrayClassPtr;
 
@@ -1993,6 +2007,12 @@ JS_IsArrayBufferViewObject(JSObject* obj);
  */
 extern JS_FRIEND_API(uint32_t)
 JS_GetArrayBufferViewByteLength(JSObject* obj);
+
+/**
+ * More generic name for JS_GetTypedArrayByteOffset to cover DataViews as well
+ */
+extern JS_FRIEND_API(uint32_t)
+JS_GetArrayBufferViewByteOffset(JSObject* obj);
 
 /*
  * Return a pointer to the start of the data referenced by a typed array. The
@@ -2842,6 +2862,20 @@ ToWindowProxyIfWindow(JSObject* obj);
  */
 extern JS_FRIEND_API(JSObject*)
 ToWindowIfWindowProxy(JSObject* obj);
+
+/*
+ * This custom date/time formatter constructor gives users the ability
+ * to specify a custom format pattern. This pattern is passed *directly*
+ * to ICU with NO SYNTAX PARSING OR VALIDATION WHATSOEVER. ICU appears to
+ * have a a modicum of testing of this, and it won't fall over completely
+ * if passed bad input. But the current behavior is entirely under-specified
+ * and emphatically not shippable on the web, and it *must* be fixed before
+ * this functionality can be exposed in the real world. (There are also some
+ * questions about whether the format exposed here is the *right* one to
+ * standardize, that will also need to be resolved to ship this.)
+ */
+extern bool
+AddMozDateTimeFormatConstructor(JSContext* cx, JS::Handle<JSObject*> intl);
 
 } /* namespace js */
 

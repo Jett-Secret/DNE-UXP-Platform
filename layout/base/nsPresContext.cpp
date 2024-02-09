@@ -46,7 +46,9 @@
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EventListenerManager.h"
 #include "prenv.h"
+#ifdef MOZ_ENABLE_NPAPI
 #include "nsPluginFrame.h"
+#endif
 #include "nsTransitionManager.h"
 #include "nsAnimationManager.h"
 #include "CounterStyleManager.h"
@@ -76,10 +78,6 @@
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
-
-#if defined(MOZ_WIDGET_GTK)
-#include "gfxPlatformGtk.h" // xxx - for UseFcFontList
-#endif
 
 
 // Needed for Start/Stop of Image Animation
@@ -990,11 +988,11 @@ nsPresContext::DetachShell()
 
   if (IsRoot()) {
     nsRootPresContext* thisRoot = static_cast<nsRootPresContext*>(this);
-
+#ifdef MOZ_ENABLE_NPAPI
     // Have to cancel our plugin geometry timer, because the
     // callback for that depends on a non-null presshell.
     thisRoot->CancelApplyPluginGeometryTimer();
-
+#endif
     // The did-paint timer also depends on a non-null pres shell.
     thisRoot->CancelDidPaintTimer();
   }
@@ -2068,19 +2066,12 @@ nsPresContext::UserFontSetUpdated(gfxUserFontEntry* aUpdatedFont)
   if (!mShell)
     return;
 
-  bool usePlatformFontList = true;
-#if defined(MOZ_WIDGET_GTK)
-  usePlatformFontList = gfxPlatformGtk::UseFcFontList();
-#endif
-
-  // xxx - until the Linux platform font list is always used, use full
-  // restyle to force updates with gfxPangoFontGroup usage
   // Note: this method is called without a font when rules in the userfont set
   // are updated, which may occur during reflow as a result of the lazy
   // initialization of the userfont set. It would be better to avoid a full
   // restyle but until this method is only called outside of reflow, schedule a
   // full restyle in these cases.
-  if (!usePlatformFontList || !aUpdatedFont) {
+  if (!aUpdatedFont) {
     PostRebuildAllStyleDataEvent(NS_STYLE_HINT_REFLOW, eRestyle_ForceDescendants);
     return;
   }
@@ -2827,12 +2818,15 @@ nsRootPresContext::nsRootPresContext(nsIDocument* aDocument,
 {
 }
 
+
 nsRootPresContext::~nsRootPresContext()
 {
+  CancelDidPaintTimer();
+#ifdef MOZ_ENABLE_NPAPI
   NS_ASSERTION(mRegisteredPlugins.Count() == 0,
                "All plugins should have been unregistered");
-  CancelDidPaintTimer();
   CancelApplyPluginGeometryTimer();
+#endif
 }
 
 /* virtual */ void
@@ -2842,7 +2836,7 @@ nsRootPresContext::Detach()
   // XXXmats maybe also CancelApplyPluginGeometryTimer(); ?
   nsPresContext::Detach();
 }
-
+#ifdef MOZ_ENABLE_NPAPI
 void
 nsRootPresContext::RegisterPluginForGeometryUpdates(nsIContent* aPlugin)
 {
@@ -2938,6 +2932,7 @@ nsRootPresContext::CancelApplyPluginGeometryTimer()
     mApplyPluginGeometryTimer = nullptr;
   }
 }
+
 
 #ifndef XP_MACOSX
 
@@ -3088,7 +3083,7 @@ nsRootPresContext::CollectPluginGeometryUpdates(LayerManager* aLayerManager)
   PluginDidSetGeometry(mRegisteredPlugins);
 #endif  // #ifndef XP_MACOSX
 }
-
+#endif // MOZ_ENABLE_NPAPI
 static void
 NotifyDidPaintForSubtreeCallback(nsITimer *aTimer, void *aClosure)
 {

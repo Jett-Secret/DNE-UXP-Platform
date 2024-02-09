@@ -154,6 +154,10 @@ nsJPEGDecoder::InitInternal()
   mSourceMgr.skip_input_data = skip_input_data;
   mSourceMgr.resync_to_restart = jpeg_resync_to_restart;
   mSourceMgr.term_source = term_source;
+  
+  // Limit the maximum allocation to the maximum our surface cache can hold.
+  mInfo.mem->max_memory_to_use = static_cast<long>(
+      std::min<size_t>(SurfaceCache::MaximumCapacity(), LONG_MAX));
 
   // Record app markers for ICC data
   for (uint32_t m = 0; m < 16; m++) {
@@ -408,7 +412,7 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
             mInfo.output_width, mInfo.output_height));
 
     mState = JPEG_START_DECOMPRESS;
-    MOZ_FALLTHROUGH; // to start decompressing.
+    [[fallthrough]]; // to start decompressing.
   }
 
   case JPEG_START_DECOMPRESS: {
@@ -435,7 +439,7 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
     // If this is a progressive JPEG ...
     mState = mInfo.buffered_image ?
              JPEG_DECOMPRESS_PROGRESSIVE : JPEG_DECOMPRESS_SEQUENTIAL;
-    MOZ_FALLTHROUGH; // to decompress sequential JPEG.
+    [[fallthrough]]; // to decompress sequential JPEG.
   }
 
   case JPEG_DECOMPRESS_SEQUENTIAL: {
@@ -457,7 +461,7 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
                    "We didn't process all of the data!");
       mState = JPEG_DONE;
     }
-    MOZ_FALLTHROUGH; // to decompress progressive JPEG.
+    [[fallthrough]]; // to decompress progressive JPEG.
   }
 
   case JPEG_DECOMPRESS_PROGRESSIVE: {
@@ -530,7 +534,7 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
 
       mState = JPEG_DONE;
     }
-    MOZ_FALLTHROUGH; // to finish decompressing.
+    [[fallthrough]]; // to finish decompressing.
   }
 
   case JPEG_DONE: {

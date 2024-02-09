@@ -22,6 +22,7 @@
 #include "nsPluginStreamListenerPeer.h"
 #include "nsIServiceManager.h"
 #include "nsThreadUtils.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/Preferences.h"
 #include "nsPluginInstanceOwner.h"
 
@@ -1388,14 +1389,23 @@ _evaluate(NPP npp, NPObject* npobj, NPString *script, NPVariant *result)
   options.setFileAndLine(spec, 0)
          .setVersion(JSVERSION_DEFAULT);
   JS::Rooted<JS::Value> rval(cx);
-  nsJSUtils::EvaluateOptions evalOptions(cx);
+  JS::AutoObjectVector scopeChain(cx);
   if (obj != js::GetGlobalForObjectCrossCompartment(obj) &&
-      !evalOptions.scopeChain.append(obj)) {
+      !scopeChain.append(obj)) {
     return false;
   }
   obj = js::GetGlobalForObjectCrossCompartment(obj);
-  nsresult rv = nsJSUtils::EvaluateString(cx, utf16script, obj, options,
-                                          evalOptions, &rval);
+  nsresult rv = NS_OK;
+  {
+    nsJSUtils::ExecutionContext exec(cx, obj);
+    exec.SetScopeChain(scopeChain);
+    exec.Compile(options, utf16script);
+    rv = exec.ExecScript(&rval);
+  }
+
+  if (!JS_WrapValue(cx, &rval)) {
+    return false;
+  }
 
   return NS_SUCCEEDED(rv) &&
          (!result || JSValToNPVariant(npp, cx, rval, result));
@@ -2013,7 +2023,7 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     // old XPCOM objects, no longer supported, but null out the out
     // param to avoid crashing plugins that still try to use this.
     *(nsISupports**)result = nullptr;
-    MOZ_FALLTHROUGH;
+    [[fallthrough]];
 
   default:
     NPN_PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("NPN_getvalue unhandled get value: %d\n", variable));

@@ -100,6 +100,11 @@ enum class ImageFormat {
   TEXTURE_WRAPPER,
 
   /**
+   * A D3D11 backed YUV image.
+   */
+  D3D11_YCBCR_IMAGE,
+
+  /**
    * An opaque handle that refers to an Image stored in the GPU
    * process.
    */
@@ -118,7 +123,14 @@ enum class StereoMode {
 enum class YUVColorSpace {
   BT601,
   BT709,
+  IDENTITY,
   // This represents the unknown format.
+  UNKNOWN,
+};
+
+enum class ColorRange {
+  LIMITED,
+  FULL,
   UNKNOWN,
 };
 

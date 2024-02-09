@@ -824,7 +824,7 @@ WasmTokenStream::next()
             return nan(begin);
         if (!IsWasmDigit(*cur_))
             break;
-        MOZ_FALLTHROUGH;
+        [[fallthrough]];
       case '0': case '1': case '2': case '3': case '4':
       case '5': case '6': case '7': case '8': case '9':
         return literal(begin);
@@ -925,6 +925,16 @@ WasmTokenStream::next()
               case 'e':
                 if (consume(u"eq"))
                     return WasmToken(WasmToken::ComparisonOpcode, Op::F32Eq, begin, cur_);
+                if (consume(u"extend8_s"))
+                    return WasmToken(WasmToken::ConversionOpcode, Op::I32Extend8S, begin, cur_);
+                if (consume(u"extend16_s"))
+                    return WasmToken(WasmToken::ConversionOpcode, Op::I32Extend16S, begin, cur_);
+                if (consume(u"extend8_s"))
+                    return WasmToken(WasmToken::ConversionOpcode, Op::I64Extend8S, begin, cur_);
+                if (consume(u"extend16_s"))
+                    return WasmToken(WasmToken::ConversionOpcode, Op::I64Extend16S, begin, cur_);
+                if (consume(u"extend32_s"))
+                    return WasmToken(WasmToken::ConversionOpcode, Op::I64Extend32S, begin, cur_);
                 break;
               case 'f':
                 if (consume(u"floor"))

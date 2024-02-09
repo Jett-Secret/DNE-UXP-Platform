@@ -261,9 +261,9 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared
     template<typename T>
     static bool createTypedArrayFromBuffer(JSContext* cx, unsigned argc, Value* vp);
 
-    static void copyData(Handle<ArrayBufferObject*> toBuffer,
-                         Handle<ArrayBufferObject*> fromBuffer,
-                         uint32_t fromIndex, uint32_t count);
+    static void copyData(Handle<ArrayBufferObject*> toBuffer, uint32_t toIndex,
+                         Handle<ArrayBufferObject*> fromBuffer, uint32_t fromIndex,
+                         uint32_t count);
 
     static void trace(JSTracer* trc, JSObject* obj);
     static void objectMoved(JSObject* obj, const JSObject* old);
@@ -339,16 +339,16 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared
     // WebAssembly support:
     static ArrayBufferObject* createForWasm(JSContext* cx, uint32_t initialSize,
                                             mozilla::Maybe<uint32_t> maxSize);
-    static MOZ_MUST_USE bool prepareForAsmJS(JSContext* cx, Handle<ArrayBufferObject*> buffer,
+    [[nodiscard]] static bool prepareForAsmJS(JSContext* cx, Handle<ArrayBufferObject*> buffer,
                                              bool needGuard);
     size_t wasmMappedSize() const;
     mozilla::Maybe<uint32_t> wasmMaxSize() const;
-    static MOZ_MUST_USE bool wasmGrowToSizeInPlace(uint32_t newSize,
+    [[nodiscard]] static bool wasmGrowToSizeInPlace(uint32_t newSize,
                                                    Handle<ArrayBufferObject*> oldBuf,
                                                    MutableHandle<ArrayBufferObject*> newBuf,
                                                    JSContext* cx);
 #ifndef WASM_HUGE_MEMORY
-    static MOZ_MUST_USE bool wasmMovingGrowToSize(uint32_t newSize,
+    [[nodiscard]] static bool wasmMovingGrowToSize(uint32_t newSize,
                                                   Handle<ArrayBufferObject*> oldBuf,
                                                   MutableHandle<ArrayBufferObject*> newBuf,
                                                   JSContext* cx);
@@ -463,9 +463,11 @@ struct uint8_clamped {
     explicit uint8_clamped(uint8_t x)    { *this = x; }
     explicit uint8_clamped(uint16_t x)   { *this = x; }
     explicit uint8_clamped(uint32_t x)   { *this = x; }
+    explicit uint8_clamped(uint64_t x)   { *this = x; }
     explicit uint8_clamped(int8_t x)     { *this = x; }
     explicit uint8_clamped(int16_t x)    { *this = x; }
     explicit uint8_clamped(int32_t x)    { *this = x; }
+    explicit uint8_clamped(int64_t x)    { *this = x; }
     explicit uint8_clamped(double x)     { *this = x; }
 
     uint8_clamped& operator=(const uint8_clamped& x) = default;
@@ -485,6 +487,11 @@ struct uint8_clamped {
         return *this;
     }
 
+    uint8_clamped& operator=(uint64_t x) {
+        val = (x > 255) ? 255 : uint8_t(x);
+        return *this;
+    }
+
     uint8_clamped& operator=(int8_t x) {
         val = (x >= 0) ? uint8_t(x) : 0;
         return *this;
@@ -500,6 +507,15 @@ struct uint8_clamped {
     }
 
     uint8_clamped& operator=(int32_t x) {
+        val = (x >= 0)
+              ? ((x < 255)
+                 ? uint8_t(x)
+                 : 255)
+              : 0;
+        return *this;
+    }
+
+    uint8_clamped& operator=(int64_t x) {
         val = (x >= 0)
               ? ((x < 255)
                  ? uint8_t(x)

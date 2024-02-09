@@ -17,6 +17,7 @@
 #include "jit/mips64/Simulator-mips64.h"
 #include "vm/ArrayObject.h"
 #include "vm/Debugger.h"
+#include "vm/EqualityOperations.h"  // js::StrictlyEqual
 #include "vm/Interpreter.h"
 #include "vm/TraceLogging.h"
 
@@ -232,8 +233,7 @@ bool
 InitProp(JSContext* cx, HandleObject obj, HandlePropertyName name, HandleValue value,
          jsbytecode* pc)
 {
-    RootedId id(cx, NameToId(name));
-    return InitPropertyOperation(cx, JSOp(*pc), obj, id, value);
+    return InitPropertyOperation(cx, JSOp(*pc), obj, name, value);
 }
 
 template<bool Equal>
@@ -941,7 +941,7 @@ HandleDebugTrap(JSContext* cx, BaselineFrame* frame, uint8_t* retAddr, bool* mus
         return jit::DebugEpilogue(cx, frame, pc, true);
 
       case JSTRAP_THROW:
-        cx->setPendingException(rval);
+        cx->setPendingExceptionAndCaptureStack(rval);
         return false;
 
       default:
@@ -1236,15 +1236,27 @@ AssertValidSymbolPtr(JSContext* cx, JS::Symbol* sym)
     MOZ_ASSERT(sym->getAllocKind() == gc::AllocKind::SYMBOL);
 }
 
+void 
+AssertValidBigIntPtr(JSContext* cx, JS::BigInt* bi) {
+    // FIXME: check runtime?
+    MOZ_ASSERT(cx->zone() == bi->zone());
+    MOZ_ASSERT(bi->isAligned());
+    MOZ_ASSERT(bi->isTenured());
+    MOZ_ASSERT(bi->getAllocKind() == gc::AllocKind::BIGINT);
+}
+
 void
 AssertValidValue(JSContext* cx, Value* v)
 {
-    if (v->isObject())
+    if (v->isObject()) {
         AssertValidObjectPtr(cx, &v->toObject());
-    else if (v->isString())
+    } else if (v->isString()) {
         AssertValidStringPtr(cx, v->toString());
-    else if (v->isSymbol())
+    } else if (v->isSymbol()) {
         AssertValidSymbolPtr(cx, v->toSymbol());
+    } else if (v->isBigInt()) {
+        AssertValidBigIntPtr(cx, v->toBigInt());
+    }
 }
 
 bool
@@ -1344,6 +1356,20 @@ CheckIsCallable(JSContext* cx, HandleValue v, CheckIsCallableKind kind)
 
     return true;
 }
+
+template <bool allowBigInt = false>
+static bool DoToNumeric(JSContext* cx, HandleValue arg, MutableHandleValue ret)
+{
+    ret.set(arg);
+    if (allowBigInt) {
+        return ToNumeric(cx, ret);
+    }
+    return ToNumber(cx, ret);
+}
+
+typedef bool (*ToNumericFn)(JSContext*, HandleValue, MutableHandleValue);
+const VMFunction ToNumberInfo = FunctionInfo<ToNumericFn>(DoToNumeric, "ToNumber");
+const VMFunction ToNumericInfo = FunctionInfo<ToNumericFn>(DoToNumeric<true>, "ToNumeric");
 
 } // namespace jit
 } // namespace js

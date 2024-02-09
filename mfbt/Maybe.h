@@ -16,6 +16,7 @@
 
 #include <new>  // for placement new
 #include <type_traits>
+#include <utility>
 
 namespace mozilla {
 
@@ -83,7 +84,15 @@ template<class T>
 class Maybe
 {
   bool mIsSome;
-  AlignedStorage2<T> mStorage;
+
+  // To support |Maybe<const Type>| we give |mStorage| the type |T| with any
+  // const-ness removed.  That allows us to |emplace()| an object into
+  // |mStorage|.  Since we treat the contained object as having type |T|
+  // everywhere else (both internally, and when exposed via public methods) the
+  // contained object is still treated as const once stored since |const| is
+  // part of |T|'s type signature.
+  typedef typename RemoveCV<T>::Type StorageType;
+  AlignedStorage2<StorageType> mStorage;
 
 public:
   typedef T ValueType;
@@ -102,16 +111,11 @@ public:
   }
 
   /**
-   * Maybe<T*> can be copy-constructed from a Maybe<U*> if U* and T* are
-   * compatible, or from Maybe<decltype(nullptr)>.
+   * Maybe<T> can be copy-constructed from a Maybe<U> if U is convertible to T.
    */
   template<typename U,
            typename =
-             typename std::enable_if<std::is_pointer<T>::value &&
-                                     (std::is_same<U, decltype(nullptr)>::value ||
-                                      (std::is_pointer<U>::value &&
-                                       std::is_base_of<typename std::remove_pointer<T>::type,
-                                                       typename std::remove_pointer<U>::type>::value))>::type>
+             typename std::enable_if<std::is_convertible<U, T>::value>::type>
   MOZ_IMPLICIT
   Maybe(const Maybe<U>& aOther)
     : mIsSome(false)
@@ -131,16 +135,11 @@ public:
   }
 
   /**
-   * Maybe<T*> can be move-constructed from a Maybe<U*> if U* and T* are
-   * compatible, or from Maybe<decltype(nullptr)>.
+   * Maybe<T> can be move-constructed from a Maybe<U> if U is convertible to T.
    */
   template<typename U,
            typename =
-             typename std::enable_if<std::is_pointer<T>::value &&
-                                     (std::is_same<U, decltype(nullptr)>::value ||
-                                      (std::is_pointer<U>::value &&
-                                       std::is_base_of<typename std::remove_pointer<T>::type,
-                                                       typename std::remove_pointer<U>::type>::value))>::type>
+             typename std::enable_if<std::is_convertible<U, T>::value>::type>
   MOZ_IMPLICIT
   Maybe(Maybe<U>&& aOther)
     : mIsSome(false)
@@ -156,13 +155,7 @@ public:
     if (&aOther != this) {
       if (aOther.mIsSome) {
         if (mIsSome) {
-          // XXX(seth): The correct code for this branch, below, can't be used
-          // due to a bug in Visual Studio 2010. See bug 1052940.
-          /*
           ref() = aOther.ref();
-          */
-          reset();
-          emplace(*aOther);
         } else {
           emplace(*aOther);
         }
@@ -173,11 +166,47 @@ public:
     return *this;
   }
 
+  template<typename U,
+           typename =
+             typename std::enable_if<std::is_convertible<U, T>::value>::type>
+  Maybe& operator=(const Maybe<U>& aOther)
+  {
+    if (aOther.isSome()) {
+      if (mIsSome) {
+        ref() = aOther.ref();
+      } else {
+        emplace(*aOther);
+      }
+    } else {
+      reset();
+    }
+    return *this;
+  }
+
   Maybe& operator=(Maybe&& aOther)
   {
     MOZ_ASSERT(this != &aOther, "Self-moves are prohibited");
 
     if (aOther.mIsSome) {
+      if (mIsSome) {
+        ref() = Move(aOther.ref());
+      } else {
+        emplace(Move(*aOther));
+      }
+      aOther.reset();
+    } else {
+      reset();
+    }
+
+    return *this;
+  }
+
+  template<typename U,
+           typename =
+             typename std::enable_if<std::is_convertible<U, T>::value>::type>
+  Maybe& operator=(Maybe<U>&& aOther)
+  {
+    if (aOther.isSome()) {
       if (mIsSome) {
         ref() = Move(aOther.ref());
       } else {
@@ -433,6 +462,72 @@ public:
   }
 };
 
+template <typename T>
+class Maybe<T&> {
+ public:
+  constexpr Maybe() = default;
+  constexpr MOZ_IMPLICIT Maybe(Nothing) {}
+
+  void emplace(T& aRef) { mValue = &aRef; }
+
+  /* Methods that check whether this Maybe contains a value */
+  explicit operator bool() const { return isSome(); }
+  bool isSome() const { return mValue; }
+  bool isNothing() const { return !mValue; }
+
+  T& ref() const {
+    MOZ_DIAGNOSTIC_ASSERT(isSome());
+    return *mValue;
+  }
+
+  T* operator->() const { return &ref(); }
+  T& operator*() const { return ref(); }
+
+  // Deliberately not defining value and ptr accessors, as these may be
+  // confusing on a reference-typed Maybe.
+
+  // XXX Should we define refOr?
+
+  void reset() { mValue = nullptr; }
+
+  template <typename Func>
+  Maybe& apply(Func&& aFunc) {
+    if (isSome()) {
+      std::forward<Func>(aFunc)(ref());
+    }
+    return *this;
+  }
+
+  template <typename Func>
+  const Maybe& apply(Func&& aFunc) const {
+    if (isSome()) {
+      std::forward<Func>(aFunc)(ref());
+    }
+    return *this;
+  }
+
+  template <typename Func>
+  auto map(Func&& aFunc) {
+    Maybe<decltype(std::forward<Func>(aFunc)(ref()))> val;
+    if (isSome()) {
+      val.emplace(std::forward<Func>(aFunc)(ref()));
+    }
+    return val;
+  }
+
+  template <typename Func>
+  auto map(Func&& aFunc) const {
+    Maybe<decltype(std::forward<Func>(aFunc)(ref()))> val;
+    if (isSome()) {
+      val.emplace(std::forward<Func>(aFunc)(ref()));
+    }
+    return val;
+  }
+
+ private:
+  T* mValue = nullptr;
+};
+
 /*
  * Some() creates a Maybe<T> value containing the provided T value. If T has a
  * move constructor, it's used to make this as efficient as possible.
@@ -443,13 +538,21 @@ public:
  * if you need to construct a Maybe value that holds a const, volatile, or
  * reference value, you need to use emplace() instead.
  */
-template<typename T>
-Maybe<typename RemoveCV<typename RemoveReference<T>::Type>::Type>
+template<typename T,
+         typename U = typename std::remove_cv<
+           typename std::remove_reference<T>::type>::type>
+Maybe<U>
 Some(T&& aValue)
 {
-  typedef typename RemoveCV<typename RemoveReference<T>::Type>::Type U;
   Maybe<U> value;
   value.emplace(Forward<T>(aValue));
+  return value;
+}
+
+template <typename T>
+Maybe<T&> SomeRef(T& aValue) {
+  Maybe<T&> value;
+  value.emplace(aValue);
   return value;
 }
 
@@ -471,6 +574,9 @@ ToMaybe(T* aPtr)
 template<typename T> bool
 operator==(const Maybe<T>& aLHS, const Maybe<T>& aRHS)
 {
+  static_assert(!std::is_reference<T>::value,
+                "operator== is not defined for Maybe<T&>, compare values or "
+                "addresses explicitly instead");
   if (aLHS.isNothing() != aRHS.isNothing()) {
     return false;
   }

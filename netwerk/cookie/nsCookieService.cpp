@@ -992,7 +992,7 @@ nsCookieService::TryInitDB(bool aRecreateDB)
         NS_ENSURE_SUCCESS(rv, RESULT_RETRY);
       }
       // Fall through to the next upgrade.
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case 2:
       {
@@ -1051,7 +1051,7 @@ nsCookieService::TryInitDB(bool aRecreateDB)
         NS_ENSURE_SUCCESS(rv, RESULT_RETRY);
       }
       // Fall through to the next upgrade.
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case 3:
       {
@@ -1148,7 +1148,7 @@ nsCookieService::TryInitDB(bool aRecreateDB)
         NS_ENSURE_SUCCESS(rv, RESULT_RETRY);
       }
       // Fall through to the next upgrade.
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case 4:
       {
@@ -1196,7 +1196,7 @@ nsCookieService::TryInitDB(bool aRecreateDB)
           ("Upgraded database to schema version 5"));
       }
       // Fall through to the next upgrade.
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case 5:
       {
@@ -1262,7 +1262,7 @@ nsCookieService::TryInitDB(bool aRecreateDB)
         COOKIE_LOGSTRING(LogLevel::Debug,
           ("Upgraded database to schema version 6"));
       }
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case 6:
       {
@@ -1322,7 +1322,7 @@ nsCookieService::TryInitDB(bool aRecreateDB)
       // No more upgrades. Update the schema version.
       rv = mDefaultDBState->dbConn->SetSchemaVersion(COOKIES_SCHEMA_VERSION);
       NS_ENSURE_SUCCESS(rv, RESULT_RETRY);
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     case COOKIES_SCHEMA_VERSION:
       break;
@@ -1340,7 +1340,7 @@ nsCookieService::TryInitDB(bool aRecreateDB)
         NS_ENSURE_SUCCESS(rv, RESULT_RETRY);
       }
       // fall through to downgrade check
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
 
     // downgrading.
     // if columns have been added to the table, we can still use the ones we
@@ -3329,7 +3329,8 @@ nsCookieService::SetCookieInternal(nsIURI                        *aHostURI,
                                          0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12,
                                          0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
                                          0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-                                         0x1F, /* 0x20, */ 0x00 };
+                                         0x1F, /* 0x20, */ 0x3B, 0x3D, 0x7F,
+                                         0x00 };
   if (cookieAttributes.name.FindCharInSet(illegalNameCharacters, 0) != -1) {
     COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, savedCookieHeader, "invalid name character");
     return newCookie;

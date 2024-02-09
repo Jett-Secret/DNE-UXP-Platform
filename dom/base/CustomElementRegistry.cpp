@@ -1,12 +1,10 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/CustomElementRegistry.h"
 
-#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/dom/CustomElementRegistryBinding.h"
 #include "mozilla/dom/HTMLElementBinding.h"
 #include "mozilla/dom/WebComponentsBinding.h"
@@ -416,6 +414,95 @@ CustomElementRegistry::EnqueueLifecycleCallback(nsIDocument::ElementCallbackType
   reactionsStack->EnqueueCallbackReaction(aCustomElement, Move(callback));
 }
 
+namespace {
+
+class CandidateFinder
+{
+public:
+  CandidateFinder(nsTArray<nsWeakPtr>&& aCandidates, nsIDocument* aDoc);
+  nsTArray<nsCOMPtr<Element>> OrderedCandidates();
+
+private:
+  bool Traverse(Element* aRoot, nsTArray<nsCOMPtr<Element>>& aOrderedElements);
+
+  nsCOMPtr<nsIDocument> mDoc;
+  nsInterfaceHashtable<nsPtrHashKey<Element>, Element> mCandidates;
+};
+
+CandidateFinder::CandidateFinder(nsTArray<nsWeakPtr>&& aCandidates,
+                                 nsIDocument* aDoc)
+  : mDoc(aDoc)
+  , mCandidates(aCandidates.Length())
+{
+  MOZ_ASSERT(mDoc);
+  for (auto& candidate : aCandidates) {
+    nsCOMPtr<Element> elem = do_QueryReferent(candidate);
+    if (!elem) {
+      continue;
+    }
+
+    Element* key = elem.get();
+    mCandidates.Put(key, elem.forget());
+  }
+}
+
+nsTArray<nsCOMPtr<Element>>
+CandidateFinder::OrderedCandidates()
+{
+  if (mCandidates.Count() == 1) {
+    // Fast path for one candidate.
+    for (auto iter = mCandidates.Iter(); !iter.Done(); iter.Next()) {
+      nsTArray<nsCOMPtr<Element>> rval({ Move(iter.Data()) });
+      iter.Remove();
+      return rval;
+    }
+  }
+
+  nsTArray<nsCOMPtr<Element>> orderedElements(mCandidates.Count());
+  for (Element* child = mDoc->GetFirstElementChild(); child; child = child->GetNextElementSibling()) {
+    if (!Traverse(child->AsElement(), orderedElements)) {
+      break;
+    }
+  }
+
+  return orderedElements;
+}
+
+bool
+CandidateFinder::Traverse(Element* aRoot, nsTArray<nsCOMPtr<Element>>& aOrderedElements)
+{
+  nsCOMPtr<Element> elem = mCandidates.Get(aRoot);
+  if (elem) {
+    mCandidates.Remove(aRoot);
+    aOrderedElements.AppendElement(Move(elem));
+    if (mCandidates.Count() == 0) {
+      return false;
+    }
+  }
+
+  if (ShadowRoot* root = aRoot->GetShadowRoot()) {
+    // First iterate the children of the shadow root if aRoot is a shadow host.
+    for (Element* child = root->GetFirstElementChild(); child;
+         child = child->GetNextElementSibling()) {
+      if (!Traverse(child, aOrderedElements)) {
+        return false;
+      }
+    }
+  }
+
+  // Iterate the explicit children of aRoot.
+  for (Element* child = aRoot->GetFirstElementChild(); child;
+       child = child->GetNextElementSibling()) {
+    if (!Traverse(child, aOrderedElements)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+}
+
 void
 CustomElementRegistry::UpgradeCandidates(nsIAtom* aKey,
                                          CustomElementDefinition* aDefinition,
@@ -427,18 +514,13 @@ CustomElementRegistry::UpgradeCandidates(nsIAtom* aKey,
     return;
   }
 
-  // TODO: Bug 1326028 - Upgrade custom element in shadow-including tree order
   nsAutoPtr<nsTArray<nsWeakPtr>> candidates;
   mCandidatesMap.RemoveAndForget(aKey, candidates);
   if (candidates) {
     CustomElementReactionsStack* reactionsStack =
       docGroup->CustomElementReactionsStack();
-    for (size_t i = 0; i < candidates->Length(); ++i) {
-      nsCOMPtr<Element> elem = do_QueryReferent(candidates->ElementAt(i));
-      if (!elem) {
-        continue;
-      }
-
+    CandidateFinder finder(Move(*candidates), mWindow->GetExtantDoc());
+    for (auto& elem : finder.OrderedCandidates()) {
       reactionsStack->EnqueueUpgradeReaction(elem, aDefinition);
     }
   }
@@ -1070,7 +1152,7 @@ CustomElementReactionsStack::Enqueue(Element* aElement,
 
   CycleCollectedJSContext* context = CycleCollectedJSContext::Get();
   RefPtr<BackupQueueMicroTask> bqmt = new BackupQueueMicroTask(this);
-  context->DispatchMicroTaskRunnable(bqmt.forget());
+  context->DispatchToMicroTask(bqmt.forget());
 }
 
 void

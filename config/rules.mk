@@ -1,5 +1,4 @@
 # -*- makefile -*-
-# vim:set ts=8 sw=8 sts=8 noet:
 #
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -412,6 +411,10 @@ EXTRA_DSO_LDOPTS += -Wl,--version-script,$(SYMBOLS_FILE)
 else
 ifeq ($(OS_TARGET),Darwin)
 EXTRA_DSO_LDOPTS += -Wl,-exported_symbols_list,$(SYMBOLS_FILE)
+else
+ifeq ($(OS_TARGET),SunOS)
+EXTRA_DSO_LDOPTS += -Wl,-M,$(SYMBOLS_FILE)
+endif
 endif
 endif
 endif
@@ -668,9 +671,6 @@ else
 	$(EXPAND_LIBS_EXEC) -- $(HOST_CC) -o $@ $(HOST_CFLAGS) $(HOST_LDFLAGS) $(HOST_PROGOBJS) $(HOST_LIBS) $(HOST_EXTRA_LIBS)
 endif # HOST_CPP_PROG_LINK
 endif
-ifndef CROSS_COMPILE
-	$(call CHECK_STDCXX,$@)
-endif
 
 #
 # This is an attempt to support generation of multiple binaries
@@ -712,9 +712,6 @@ ifneq (,$(HOST_CPPSRCS)$(USE_HOST_CXX))
 else
 	$(EXPAND_LIBS_EXEC) -- $(HOST_CC) $(HOST_OUTOPTION)$@ $(HOST_CFLAGS) $(INCLUDES) $< $(HOST_LIBS) $(HOST_EXTRA_LIBS)
 endif
-endif
-ifndef CROSS_COMPILE
-	$(call CHECK_STDCXX,$@)
 endif
 
 ifdef DTRACE_PROBE_OBJ

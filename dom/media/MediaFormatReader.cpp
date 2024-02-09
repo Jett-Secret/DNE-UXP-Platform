@@ -3,10 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_EME
-#include "mozilla/CDMProxy.h"
-#endif
-
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/Preferences.h"
@@ -351,12 +347,7 @@ MediaFormatReader::DecoderFactory::DoCreateDecoder(TrackType aTrack)
   if (!mOwner->mPlatform) {
     mOwner->mPlatform = new PDMFactory();
     if (mOwner->IsEncrypted()) {
-#ifdef MOZ_EME
-      MOZ_ASSERT(mOwner->mCDMProxy);
-      mOwner->mPlatform->SetCDMProxy(mOwner->mCDMProxy);
-#else
       return MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR, "EME not supported");
-#endif
     }
   }
 
@@ -368,7 +359,9 @@ MediaFormatReader::DecoderFactory::DoCreateDecoder(TrackType aTrack)
         : *ownerData.mOriginalInfo->GetAsAudioInfo(),
         ownerData.mTaskQueue,
         ownerData.mCallback.get(),
+#ifdef MOZ_GMP
         mOwner->mCrashHelper,
+#endif
         ownerData.mIsBlankDecode,
         &result
       });
@@ -386,7 +379,9 @@ MediaFormatReader::DecoderFactory::DoCreateDecoder(TrackType aTrack)
         ownerData.mCallback.get(),
         mOwner->mKnowsCompositor,
         mOwner->GetImageContainer(),
+#ifdef MOZ_GMP
         mOwner->mCrashHelper,
+#endif
         ownerData.mIsBlankDecode,
         &result
       });
@@ -579,61 +574,13 @@ MediaFormatReader::InitInternal()
   mVideo.mTaskQueue =
     new TaskQueue(GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
 
+#ifdef MOZ_GMP
   // Note: GMPCrashHelper must be created on main thread, as it may use
   // weak references, which aren't threadsafe.
   mCrashHelper = mDecoder->GetCrashHelper();
+#endif
 
   return NS_OK;
-}
-
-#ifdef MOZ_EME
-class DispatchKeyNeededEvent : public Runnable {
-public:
-  DispatchKeyNeededEvent(AbstractMediaDecoder* aDecoder,
-                         nsTArray<uint8_t>& aInitData,
-                         const nsString& aInitDataType)
-    : mDecoder(aDecoder)
-    , mInitData(aInitData)
-    , mInitDataType(aInitDataType)
-  {
-  }
-  NS_IMETHOD Run() override {
-    // Note: Null check the owner, as the decoder could have been shutdown
-    // since this event was dispatched.
-    MediaDecoderOwner* owner = mDecoder->GetOwner();
-    if (owner) {
-      owner->DispatchEncrypted(mInitData, mInitDataType);
-    }
-    mDecoder = nullptr;
-    return NS_OK;
-  }
-private:
-  RefPtr<AbstractMediaDecoder> mDecoder;
-  nsTArray<uint8_t> mInitData;
-  nsString mInitDataType;
-};
-
-void
-MediaFormatReader::SetCDMProxy(CDMProxy* aProxy)
-{
-  RefPtr<CDMProxy> proxy = aProxy;
-  RefPtr<MediaFormatReader> self = this;
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=] () {
-    MOZ_ASSERT(self->OnTaskQueue());
-    self->mCDMProxy = proxy;
-  });
-  OwnerThread()->Dispatch(r.forget());
-}
-#endif // MOZ_EME
-
-bool
-MediaFormatReader::IsWaitingOnCDMResource() {
-  MOZ_ASSERT(OnTaskQueue());
-#ifdef MOZ_EME
-  return IsEncrypted() && !mCDMProxy;
-#else
-  return false;
-#endif
 }
 
 RefPtr<MediaDecoderReader::MetadataPromise>
@@ -671,9 +618,7 @@ MediaFormatReader::OnDemuxerInitDone(nsresult)
   UniquePtr<MetadataTags> tags(MakeUnique<MetadataTags>());
 
   RefPtr<PDMFactory> platform;
-  if (!IsWaitingOnCDMResource()) {
-    platform = new PDMFactory();
-  }
+  platform = new PDMFactory();
 
   // To decode, we need valid video and a place to put it.
   bool videoActive = !!mDemuxer->GetNumberTracks(TrackInfo::kVideoTrack) &&
@@ -740,13 +685,6 @@ MediaFormatReader::OnDemuxerInitDone(nsresult)
 
   UniquePtr<EncryptionInfo> crypto = mDemuxer->GetCrypto();
   if (mDecoder && crypto && crypto->IsEncrypted()) {
-#ifdef MOZ_EME
-    // Try and dispatch 'encrypted'. Won't go if ready state still HAVE_NOTHING.
-    for (uint32_t i = 0; i < crypto->mInitDatas.Length(); i++) {
-      NS_DispatchToMainThread(
-        new DispatchKeyNeededEvent(mDecoder, crypto->mInitDatas[i].mInitData, crypto->mInitDatas[i].mType));
-    }
-#endif
     mInfo.mCrypto = *crypto;
   }
 
@@ -1503,6 +1441,15 @@ MediaFormatReader::Update(TrackType aTrack)
         nsCString error;
         mVideo.mIsHardwareAccelerated =
           mVideo.mDecoder && mVideo.mDecoder->IsHardwareAccelerated(error);
+#ifdef XP_WIN
+        // D3D11_YCBCR_IMAGE images are GPU based, we try to limit the amount
+        // of GPU RAM used.
+        VideoData* videoData = static_cast<VideoData*>(output.get());
+        mVideo.mIsHardwareAccelerated =
+          mVideo.mIsHardwareAccelerated ||
+          (videoData->mImage &&
+           videoData->mImage->GetFormat() == ImageFormat::D3D11_YCBCR_IMAGE);
+#endif
       }
     } else if (decoder.HasFatalError()) {
       LOG("Rejecting %s promise: DECODE_ERROR", TrackTypeToStr(aTrack));

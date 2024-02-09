@@ -179,11 +179,9 @@ class JSObject : public js::gc::Cell
      * Make a non-array object with the specified initial state. This method
      * takes ownership of any extantSlots it is passed.
      */
-    static inline JSObject* create(js::ExclusiveContext* cx,
-                                   js::gc::AllocKind kind,
-                                   js::gc::InitialHeap heap,
-                                   js::HandleShape shape,
-                                   js::HandleObjectGroup group);
+    static inline JS::Result<JSObject*, JS::OOM&>
+    create(js::ExclusiveContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
+           js::HandleShape shape, js::HandleObjectGroup group);
 
     // Set the initial slots and elements of an object. These pointers are only
     // valid for native objects, but during initialization are set for all
@@ -1173,7 +1171,7 @@ ToPropertyDescriptor(JSContext* cx, HandleValue descval, bool checkAccessors,
  * callable. This performs exactly the checks omitted by ToPropertyDescriptor
  * when checkAccessors is false.
  */
-bool
+Result<>
 CheckPropertyDescriptorAccessors(JSContext* cx, Handle<JS::PropertyDescriptor> desc);
 
 void
@@ -1347,11 +1345,13 @@ FreezeObject(JSContext* cx, HandleObject obj)
 extern bool
 TestIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level, bool* resultp);
 
-extern bool
-SpeciesConstructor(JSContext* cx, HandleObject obj, HandleValue defaultCtor, MutableHandleValue pctor);
+[[nodiscard]] extern JSObject*
+SpeciesConstructor(JSContext* cx, HandleObject obj, HandleObject defaultCtor,
+                   bool (*isDefaultSpecies)(JSContext*, JSFunction*));
 
-extern bool
-SpeciesConstructor(JSContext* cx, HandleObject obj, JSProtoKey ctorKey, MutableHandleValue pctor);
+[[nodiscard]] extern JSObject*
+SpeciesConstructor(JSContext* cx, HandleObject obj, JSProtoKey ctorKey,
+                   bool (*isDefaultSpecies)(JSContext*, JSFunction*));
 
 extern bool
 GetObjectFromIncumbentGlobal(JSContext* cx, MutableHandleObject obj);

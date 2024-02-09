@@ -65,6 +65,7 @@ enum class OperatingSystem {
   OSX11_0,
   OSX12_0,
   OSX13_0,
+  OSX14_0,
   Ios
 };
 
@@ -165,7 +166,7 @@ struct GfxDriverInfo
   static GfxDeviceFamily* mDeviceFamilies[DeviceFamilyMax];
 
   static const nsAString& GetDeviceVendor(DeviceVendor id);
-  static nsAString* mDeviceVendors[DeviceVendorMax];
+  static nsString* mDeviceVendors[DeviceVendorMax];
 
   nsString mModel, mHardware, mProduct, mManufacturer;
 

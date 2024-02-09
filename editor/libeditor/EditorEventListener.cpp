@@ -189,6 +189,9 @@ EditorEventListener::InstallToEditor()
   elmP->AddEventListenerByType(this,
                                NS_LITERAL_STRING("click"),
                                TrustedEventsAtCapture());
+  elmP->AddEventListenerByType(this,
+                               NS_LITERAL_STRING("auxclick"),
+                               TrustedEventsAtSystemGroupCapture());
 // Focus event doesn't bubble so adding the listener to capturing phase.
 // Make sure this works after bug 235441 gets fixed.
   elmP->AddEventListenerByType(this,
@@ -238,6 +241,8 @@ EditorEventListener::Disconnect()
 void
 EditorEventListener::UninstallFromEditor()
 {
+  CleanupDragDropCaret();
+
   nsCOMPtr<EventTarget> piTarget = mEditorBase->GetDOMEventTarget();
   if (!piTarget) {
     return;
@@ -280,6 +285,9 @@ EditorEventListener::UninstallFromEditor()
   elmP->RemoveEventListenerByType(this,
                                   NS_LITERAL_STRING("click"),
                                   TrustedEventsAtCapture());
+  elmP->RemoveEventListenerByType(this,
+                                  NS_LITERAL_STRING("auxclick"),
+                                  TrustedEventsAtSystemGroupCapture());
   elmP->RemoveEventListenerByType(this,
                                   NS_LITERAL_STRING("blur"),
                                   TrustedEventsAtCapture());
@@ -445,6 +453,15 @@ EditorEventListener::HandleEvent(nsIDOMEvent* aEvent)
     }
     // click
     case eMouseClick: {
+      WidgetMouseEvent* widgetMouseEvent = internalEvent->AsMouseEvent();
+      // Don't handle non-primary click events
+      if (widgetMouseEvent->button != WidgetMouseEvent::eLeftButton) {
+        return NS_OK;
+      }
+      [[fallthrough]];
+    }
+    // auxclick
+    case eMouseAuxClick: {
       nsCOMPtr<nsIDOMMouseEvent> mouseEvent = do_QueryInterface(aEvent);
       NS_ENSURE_TRUE(mouseEvent, NS_OK);
       // If the preceding mousedown event or mouseup event was consumed,
@@ -1112,7 +1129,7 @@ EditorEventListener::Focus(WidgetEvent* aFocusEvent)
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDOMEventTarget> target = aFocusEvent->GetDOMEventTarget();
+  nsCOMPtr<nsIDOMEventTarget> target = aFocusEvent->GetOriginalDOMEventTarget();
   nsCOMPtr<nsINode> node = do_QueryInterface(target);
   NS_ENSURE_TRUE(node, NS_ERROR_UNEXPECTED);
 
@@ -1124,13 +1141,15 @@ EditorEventListener::Focus(WidgetEvent* aFocusEvent)
   }
 
   if (node->IsNodeOfType(nsINode::eCONTENT)) {
+    nsIContent* content =
+      node->AsContent()->FindFirstNonChromeOnlyAccessContent();
     // XXX If the focus event target is a form control in contenteditable
     // element, perhaps, the parent HTML editor should do nothing by this
     // handler.  However, FindSelectionRoot() returns the root element of the
     // contenteditable editor.  So, the editableRoot value is invalid for
     // the plain text editor, and it will be set to the wrong limiter of
     // the selection.  However, fortunately, actual bugs are not found yet.
-    nsCOMPtr<nsIContent> editableRoot = editorBase->FindSelectionRoot(node);
+    nsCOMPtr<nsIContent> editableRoot = editorBase->FindSelectionRoot(content);
 
     // make sure that the element is really focused in case an earlier
     // listener in the chain changed the focus.

@@ -35,6 +35,7 @@
 #include "js/Principals.h"
 #include "js/Realm.h"
 #include "js/RootingAPI.h"
+#include "js/Stream.h"
 #include "js/TracingAPI.h"
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
@@ -128,14 +129,14 @@ class MOZ_RAII AutoVectorRooterBase : protected AutoGCRooter
     size_t length() const { return vector.length(); }
     bool empty() const { return vector.empty(); }
 
-    MOZ_MUST_USE bool append(const T& v) { return vector.append(v); }
-    MOZ_MUST_USE bool appendN(const T& v, size_t len) { return vector.appendN(v, len); }
-    MOZ_MUST_USE bool append(const T* ptr, size_t len) { return vector.append(ptr, len); }
-    MOZ_MUST_USE bool appendAll(const AutoVectorRooterBase<T>& other) {
+    [[nodiscard]] bool append(const T& v) { return vector.append(v); }
+    [[nodiscard]] bool appendN(const T& v, size_t len) { return vector.appendN(v, len); }
+    [[nodiscard]] bool append(const T* ptr, size_t len) { return vector.append(ptr, len); }
+    [[nodiscard]] bool appendAll(const AutoVectorRooterBase<T>& other) {
         return vector.appendAll(other.vector);
     }
 
-    MOZ_MUST_USE bool insert(T* p, const T& val) { return vector.insert(p, val); }
+    [[nodiscard]] bool insert(T* p, const T& val) { return vector.insert(p, val); }
 
     /* For use when space has already been reserved. */
     void infallibleAppend(const T& v) { vector.infallibleAppend(v); }
@@ -143,7 +144,7 @@ class MOZ_RAII AutoVectorRooterBase : protected AutoGCRooter
     void popBack() { vector.popBack(); }
     T popCopy() { return vector.popCopy(); }
 
-    MOZ_MUST_USE bool growBy(size_t inc) {
+    [[nodiscard]] bool growBy(size_t inc) {
         size_t oldLength = vector.length();
         if (!vector.growByUninitialized(inc))
             return false;
@@ -151,7 +152,7 @@ class MOZ_RAII AutoVectorRooterBase : protected AutoGCRooter
         return true;
     }
 
-    MOZ_MUST_USE bool resize(size_t newLength) {
+    [[nodiscard]] bool resize(size_t newLength) {
         size_t oldLength = vector.length();
         if (newLength <= oldLength) {
             vector.shrinkBy(oldLength - newLength);
@@ -165,7 +166,7 @@ class MOZ_RAII AutoVectorRooterBase : protected AutoGCRooter
 
     void clear() { vector.clear(); }
 
-    MOZ_MUST_USE bool reserve(size_t newLength) {
+    [[nodiscard]] bool reserve(size_t newLength) {
         return vector.reserve(newLength);
     }
 
@@ -642,6 +643,7 @@ typedef enum JSExnType {
     JSEXN_ERR,
     JSEXN_FIRST = JSEXN_ERR,
         JSEXN_INTERNALERR,
+        JSEXN_AGGREGATEERR,
         JSEXN_EVALERR,
         JSEXN_RANGEERR,
         JSEXN_REFERENCEERR,
@@ -958,15 +960,6 @@ InformalValueTypeName(const JS::Value& v);
 
 } /* namespace JS */
 
-extern JS_PUBLIC_API(bool)
-JS_StrictlyEqual(JSContext* cx, JS::Handle<JS::Value> v1, JS::Handle<JS::Value> v2, bool* equal);
-
-extern JS_PUBLIC_API(bool)
-JS_LooselyEqual(JSContext* cx, JS::Handle<JS::Value> v1, JS::Handle<JS::Value> v2, bool* equal);
-
-extern JS_PUBLIC_API(bool)
-JS_SameValue(JSContext* cx, JS::Handle<JS::Value> v1, JS::Handle<JS::Value> v2, bool* same);
-
 /** True iff fun is the global eval function. */
 extern JS_PUBLIC_API(bool)
 JS_IsBuiltinEvalFunction(JSFunction* fun);
@@ -1169,6 +1162,16 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
+    bool streams() const { return streams_; }
+    ContextOptions& setStreams(bool flag) {
+        streams_ = flag;
+        return *this;
+    }
+    ContextOptions& toggleStreams() {
+        streams_ = !streams_;
+        return *this;
+    }
+
     bool nativeRegExp() const { return nativeRegExp_; }
     ContextOptions& setNativeRegExp(bool flag) {
         nativeRegExp_ = flag;
@@ -1251,6 +1254,7 @@ class JS_PUBLIC_API(ContextOptions) {
     bool strictMode_ : 1;
     bool extraWarnings_ : 1;
     bool arrayProtoValues_ : 1;
+    bool streams_ : 1;
 };
 
 JS_PUBLIC_API(ContextOptions&)
@@ -1544,6 +1548,22 @@ JS_DefineProfilingFunctions(JSContext* cx, JS::HandleObject obj);
 /* Defined in vm/Debugger.cpp. */
 extern JS_PUBLIC_API(bool)
 JS_DefineDebuggerObject(JSContext* cx, JS::HandleObject obj);
+
+namespace JS {
+
+/**
+ * Tell JS engine whether Profile Timeline Recording is enabled or not.
+ * If Profile Timeline Recording is enabled, data shown there like stack won't
+ * be optimized out.
+ * This is global state and not associated with specific runtime or context.
+ */
+extern JS_PUBLIC_API(void)
+SetProfileTimelineRecordingEnabled(bool enabled);
+
+extern JS_PUBLIC_API(bool)
+IsProfileTimelineRecordingEnabled();
+
+} // namespace JS
 
 #ifdef JS_HAS_CTYPES
 /**
@@ -2054,6 +2074,9 @@ inline int CheckIsSetterOp(JSSetterOp op);
 #define JS_PSGS(name, getter, setter, flags) \
     JS_PS_ACCESSOR_SPEC(name, JSNATIVE_WRAPPER(getter), JSNATIVE_WRAPPER(setter), flags, \
                          JSPROP_SHARED)
+#define JS_SYM_GET(symbol, getter, flags) \
+    JS_PS_ACCESSOR_SPEC(reinterpret_cast<const char*>(uint32_t(::JS::SymbolCode::symbol) + 1), \
+                        JSNATIVE_WRAPPER(getter), JSNATIVE_WRAPPER(nullptr), flags, JSPROP_SHARED)
 #define JS_SELF_HOSTED_GET(name, getterName, flags) \
     JS_PS_ACCESSOR_SPEC(name, SELFHOSTED_WRAPPER(getterName), JSNATIVE_WRAPPER(nullptr), flags, \
                          JSPROP_SHARED | JSPROP_GETTER)
@@ -3728,7 +3751,7 @@ namespace JS {
  * addrefs/copies/tracing/etc.
  *
  * Furthermore, in some cases compile options are propagated from one entity to
- * another (e.g. from a scriipt to a function defined in that script).  This
+ * another (e.g. from a script to a function defined in that script).  This
  * involves copying over some, but not all, of the options.
  *
  * So, we have a class hierarchy that reflects these four use cases:
@@ -4166,6 +4189,17 @@ FinishOffThreadModule(JSContext* cx, void* token);
 extern JS_PUBLIC_API(void)
 CancelOffThreadModule(JSContext* cx, void* token);
 
+extern JS_PUBLIC_API(bool)
+DecodeOffThreadScript(JSContext* cx, const ReadOnlyCompileOptions& options,
+                      mozilla::Vector<uint8_t>& buffer /* TranscodeBuffer& */, size_t cursor,
+                      OffThreadCompileCallback callback, void* callbackData);
+
+extern JS_PUBLIC_API(JSScript*)
+FinishOffThreadScriptDecoder(JSContext* cx, void* token);
+
+extern JS_PUBLIC_API(void)
+CancelOffThreadScriptDecoder(JSContext* cx, void* token);
+
 /**
  * Compile a function with envChain plus the global as its scope chain.
  * envChain must contain objects in the current compartment of cx.  The actual
@@ -4304,19 +4338,57 @@ extern JS_PUBLIC_API(bool)
 Evaluate(JSContext* cx, const ReadOnlyCompileOptions& options,
          const char* filename, JS::MutableHandleValue rval);
 
-using ModuleResolveHook = JSObject* (*)(JSContext*, HandleObject, HandleString);
+using ModuleResolveHook = JSObject* (*)(JSContext*, HandleValue, HandleString);
 
 /**
- * Get the HostResolveImportedModule hook for the runtime.
+ * Get the HostImportModuleDynamically hook for the runtime.
  */
 extern JS_PUBLIC_API(ModuleResolveHook)
 GetModuleResolveHook(JSRuntime* rt);
 
 /**
- * Set the HostResolveImportedModule hook for the runtime to the given function.
+ * Set the HostImportModuleDynamically hook for the runtime to the given
+ * function.
+ *
+ * If this hook is not set (or set to nullptr) then the JS engine will throw an
+ * exception if dynamic module import is attempted.
  */
 extern JS_PUBLIC_API(void)
 SetModuleResolveHook(JSRuntime* rt, ModuleResolveHook func);
+
+using ModuleMetadataHook = bool (*)(JSContext*, HandleObject, HandleObject);
+
+/**
+ * Get the hook for populating the import.meta metadata object.
+ */
+extern JS_PUBLIC_API(ModuleMetadataHook)
+GetModuleMetadataHook(JSContext* cx);
+
+/**
+ * Set the hook for populating the import.meta metadata object to the given
+ * function.
+ */
+extern JS_PUBLIC_API(void)
+SetModuleMetadataHook(JSContext* cx, ModuleMetadataHook func);
+
+using ModuleDynamicImportHook = bool (*)(JSContext* cx, HandleValue referencingPrivate,
+                                         HandleString specifier, HandleObject promise);
+
+/**
+ * Get the HostResolveImportedModule hook for the runtime.
+ */
+extern JS_PUBLIC_API(ModuleDynamicImportHook)
+GetModuleDynamicImportHook(JSContext* cx);
+
+/**
+ * Set the HostResolveImportedModule hook for the runtime to the given function.
+ */
+extern JS_PUBLIC_API(void)
+SetModuleDynamicImportHook(JSContext* cx, ModuleDynamicImportHook func);
+
+extern JS_PUBLIC_API(bool)
+FinishDynamicModuleImport(JSContext* cx, HandleValue referencingPrivate, HandleString specifier,
+                          HandleObject promise);
 
 /**
  * Parse the given source buffer as a module in the scope of the current global
@@ -4327,17 +4399,51 @@ CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
               SourceBufferHolder& srcBuf, JS::MutableHandleObject moduleRecord);
 
 /**
- * Set the [[HostDefined]] field of a source text module record to the given
- * value.
+ * Set a private value associated with a source text module record.
  */
 extern JS_PUBLIC_API(void)
-SetModuleHostDefinedField(JSObject* module, const JS::Value& value);
+SetModulePrivate(JSObject* module, const JS::Value& value);
 
 /**
- * Get the [[HostDefined]] field of a source text module record.
+ * Get the private value associated with a source text module record.
  */
 extern JS_PUBLIC_API(JS::Value)
-GetModuleHostDefinedField(JSObject* module);
+GetModulePrivate(JSObject* module);
+
+/**
+ * Set a private value associated with a script. Note that this value is shared
+ * by all nested scripts compiled from a single source file.
+ */
+extern JS_PUBLIC_API(void)
+SetScriptPrivate(JSScript* script, const JS::Value& value);
+
+/**
+ * Get the private value associated with a script. Note that this value is
+ * shared by all nested scripts compiled from a single source file.
+ */
+extern JS_PUBLIC_API(JS::Value)
+GetScriptPrivate(JSScript* script);
+
+/*
+ * Return the private value associated with currently executing script or
+ * module, or undefined if there is no such script.
+ */
+extern JS_PUBLIC_API(JS::Value)
+GetScriptedCallerPrivate(JSContext* cx);
+
+/**
+ * Hooks called when references to a script private value are created or
+ * destroyed. This allows use of a reference counted object as the
+ * script private.
+ */
+using ScriptPrivateReferenceHook = void (*)(const JS::Value&);
+
+/**
+ * Set the script private finalize hook for the runtime to the given function.
+ */
+extern JS_PUBLIC_API(void)
+SetScriptPrivateReferenceHooks(JSContext* cx, ScriptPrivateReferenceHook addRefHook,
+                               ScriptPrivateReferenceHook releaseHook);
 
 /*
  * Perform the ModuleInstantiate operation on the given source text module
@@ -4445,9 +4551,14 @@ SetPromiseRejectionTrackerCallback(JSContext* cx, JSPromiseRejectionTrackerCallb
 
 /**
  * Returns a new instance of the Promise builtin class in the current
- * compartment, with the right slot layout. If a `proto` is passed, that gets
- * set as the instance's [[Prototype]] instead of the original value of
- * `Promise.prototype`.
+ * compartment, with the right slot layout.
+ *
+ * The `executor` can be a `nullptr`. In that case, the only way to resolve or
+ * reject the returned promise is via the `JS::ResolvePromise` and
+ * `JS::RejectPromise` JSAPI functions.
+ *
+ * If a `proto` is passed, that gets set as the instance's [[Prototype]]
+ * instead of the original value of `Promise.prototype`.
  */
 extern JS_PUBLIC_API(JSObject*)
 NewPromiseObject(JSContext* cx, JS::HandleObject executor, JS::HandleObject proto = nullptr);
@@ -4499,6 +4610,27 @@ GetPromiseID(JS::HandleObject promise);
  */
 extern JS_PUBLIC_API(JS::Value)
 GetPromiseResult(JS::HandleObject promise);
+
+/**
+ * Returns whether the given promise's rejection is already handled or not.
+ *
+ * The caller must check the given promise is rejected before checking it's
+ * handled or not.
+ */
+extern JS_PUBLIC_API(bool)
+GetPromiseIsHandled(JS::HandleObject promise);
+
+/**
+ * Returns whether the given promise's rejection is reported or not.
+ */
+extern JS_PUBLIC_API(bool)
+GetPromiseIsReported(JS::HandleObject promise);
+
+/**
+ * Mark the given promise's rejection as already reported.
+ */
+extern JS_PUBLIC_API(void)
+MarkPromiseRejectionReported(JS::HandleObject promise);
 
 /**
  * Returns a js::SavedFrame linked list of the stack that lead to the given
@@ -5222,8 +5354,8 @@ JS_ResetDefaultLocale(JSContext* cx);
  * Locale specific string conversion and error message callbacks.
  */
 struct JSLocaleCallbacks {
-    JSLocaleToUpperCase     localeToUpperCase;
-    JSLocaleToLowerCase     localeToLowerCase;
+    JSLocaleToUpperCase     localeToUpperCase; // not used
+    JSLocaleToLowerCase     localeToLowerCase; // not used
     JSLocaleCompare         localeCompare; // not used
     JSLocaleToUnicode       localeToUnicode;
 };
@@ -5420,7 +5552,7 @@ class JSErrorBase
 /**
  * Notes associated with JSErrorReport.
  */
-class JSErrorNotes
+class JS_PUBLIC_API(JSErrorNotes)
 {
   public:
     class Note : public JSErrorBase
@@ -5453,10 +5585,17 @@ class JSErrorNotes
     // Create a deep copy of notes.
     js::UniquePtr<JSErrorNotes> copy(JSContext* cx);
 
-    class iterator : public std::iterator<std::input_iterator_tag, js::UniquePtr<Note>>
+    class iterator
     {
+      private:
         js::UniquePtr<Note>* note_;
       public:
+        using iterator_category = std::input_iterator_tag;
+        using value_type = js::UniquePtr<Note>;
+        using difference_type = ptrdiff_t;
+        using pointer = value_type*;
+        using reference = value_type&;
+
         explicit iterator(js::UniquePtr<Note>* note = nullptr) : note_(note)
         {}
 
@@ -5746,8 +5885,22 @@ JS_IsExceptionPending(JSContext* cx);
 extern JS_PUBLIC_API(bool)
 JS_GetPendingException(JSContext* cx, JS::MutableHandleValue vp);
 
+namespace JS {
+
+enum class ExceptionStackBehavior: bool {
+  // Do not capture any stack.
+  DoNotCapture,
+
+  // Capture the current JS stack when setting the exception. It may be
+  // retrieved by JS::GetPendingExceptionStack.
+  Capture
+};
+
+} // namespace JS
+
 extern JS_PUBLIC_API(void)
-JS_SetPendingException(JSContext* cx, JS::HandleValue v);
+JS_SetPendingException(JSContext* cx, JS::HandleValue v,
+                       JS::ExceptionStackBehavior behavior = JS::ExceptionStackBehavior::Capture);
 
 extern JS_PUBLIC_API(void)
 JS_ClearPendingException(JSContext* cx);
@@ -5774,6 +5927,7 @@ class JS_PUBLIC_API(AutoSaveExceptionState)
     bool wasOverRecursed;
     bool wasThrowing;
     RootedValue exceptionValue;
+    RootedObject exceptionStack;
 
   public:
     /*
@@ -5792,12 +5946,7 @@ class JS_PUBLIC_API(AutoSaveExceptionState)
      * Discard any stored exception state.
      * If this is called, the destructor is a no-op.
      */
-    void drop() {
-        wasPropagatingForcedReturn = false;
-        wasOverRecursed = false;
-        wasThrowing = false;
-        exceptionValue.setUndefined();
-    }
+    void drop();
 
     /*
      * Replace cx's exception state with the stored exception state. Then
@@ -5806,6 +5955,18 @@ class JS_PUBLIC_API(AutoSaveExceptionState)
      */
     void restore();
 };
+
+/**
+ * Get the SavedFrame stack object captured when the pending exception was set
+ * on the JSContext. This fuzzily correlates with a `throw` statement in JS,
+ * although arbitrary JSAPI consumers or VM code may also set pending exceptions
+ * via `JS_SetPendingException`.
+ *
+ * This is not the same stack as `e.stack` when `e` is an `Error` object. (That
+ * would be JS::ExceptionStackOrNull).
+ */
+[[nodiscard]] JS_PUBLIC_API(JSObject*)
+GetPendingExceptionStack(JSContext* cx);
 
 } /* namespace JS */
 
@@ -6043,7 +6204,10 @@ enum TranscodeResult
     TranscodeResult_Failure_AsmJSNotSupported =   TranscodeResult_Failure | 0x3,
     TranscodeResult_Failure_BadDecode =           TranscodeResult_Failure | 0x4,
 
-    // A error, the JSContext has a pending exception.
+    TranscodeResult_Failure_WrongCompileOption =  TranscodeResult_Failure | 0x5,
+    TranscodeResult_Failure_NotInterpretedFun =   TranscodeResult_Failure | 0x6,
+
+    // There is a pending exception on the context.
     TranscodeResult_Throw = 0x200
 };
 
@@ -6060,6 +6224,24 @@ DecodeScript(JSContext* cx, TranscodeBuffer& buffer, JS::MutableHandleScript scr
 extern JS_PUBLIC_API(TranscodeResult)
 DecodeInterpretedFunction(JSContext* cx, TranscodeBuffer& buffer, JS::MutableHandleFunction funp,
                           size_t cursorIndex = 0);
+
+// Register an encoder on the given script source, such that all functions can
+// be encoded as they are parsed. This strategy is used to avoid blocking the
+// main thread in a non-interruptible way.
+//
+// The |script| argument of |StartIncrementalEncoding| and
+// |FinishIncrementalEncoding| should be the top-level script returned either as
+// an out-param of any of the |Compile| functions, or the result of
+// |FinishOffThreadScript|.
+//
+// The |buffer| argument of |FinishIncrementalEncoding| is used for appending
+// the encoded bytecode into the buffer. If any of these functions failed, the
+// content of |buffer| would be undefined.
+extern JS_PUBLIC_API(bool)
+StartIncrementalEncoding(JSContext* cx, JS::HandleScript script);
+
+extern JS_PUBLIC_API(bool)
+FinishIncrementalEncoding(JSContext* cx, JS::HandleScript script, TranscodeBuffer& buffer);
 
 } /* namespace JS */
 

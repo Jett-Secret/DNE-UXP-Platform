@@ -431,6 +431,11 @@ class ScriptSource
     // memory management.
     const char* introductionType_;
 
+    // The bytecode cache encoder is used to encode only the content of function
+    // which are delazified.  If this value is not nullptr, then each delazified
+    // function should be recorded before their first execution.
+    UniquePtr<XDRIncrementalEncoder> xdrEncoder_;
+
     // True if we can call JSRuntime::sourceHook to load the source on
     // demand. If sourceRetrievable_ and hasSourceData() are false, it is not
     // possible to get source at all.
@@ -452,6 +457,7 @@ class ScriptSource
         parameterListEnd_(0),
         introducerFilename_(nullptr),
         introductionType_(nullptr),
+        xdrEncoder_(nullptr),
         sourceRetrievable_(false),
         hasIntroductionOffset_(false)
     {
@@ -514,12 +520,12 @@ class ScriptSource
     void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                 JS::ScriptSourceInfo* info) const;
 
-    MOZ_MUST_USE bool setSource(ExclusiveContext* cx,
+    [[nodiscard]] bool setSource(ExclusiveContext* cx,
                                 mozilla::UniquePtr<char16_t[], JS::FreePolicy>&& source,
                                 size_t length);
     void setSource(SharedImmutableTwoByteString&& string);
 
-    MOZ_MUST_USE bool setCompressedSource(
+    [[nodiscard]] bool setCompressedSource(
         ExclusiveContext* cx,
         mozilla::UniquePtr<char[], JS::FreePolicy>&& raw,
         size_t rawLength,
@@ -574,6 +580,29 @@ class ScriptSource
         introductionOffset_ = offset;
         hasIntroductionOffset_ = true;
     }
+
+    // Return wether an XDR encoder is present or not.
+    bool hasEncoder() const { return bool(xdrEncoder_); }
+
+    // Create a new XDR encoder, and encode the top-level JSScript. The result
+    // of the encoding would be available in the |buffer| provided as argument,
+    // as soon as |xdrFinalize| is called and all xdr function calls returned
+    // successfully.
+    bool xdrEncodeTopLevel(ExclusiveContext* cx, HandleScript script);
+
+    // Encode a delazified JSFunction.  In case of errors, the XDR encoder is
+    // freed and the |buffer| provided as argument to |xdrEncodeTopLevel| is
+    // considered undefined.
+    //
+    // The |sourceObject| argument is the object holding the current
+    // ScriptSource.
+    bool xdrEncodeFunction(ExclusiveContext* cx, HandleFunction fun,
+                           HandleScriptSource sourceObject);
+
+    // Linearize the encoded content in the |buffer| provided as argument to
+    // |xdrEncodeTopLevel|, and free the XDR encoder.  In case of errors, the
+    // |buffer| is considered undefined.
+    bool xdrFinalizeEncoder(JS::TranscodeBuffer& buffer);
 };
 
 class ScriptSourceHolder
@@ -608,6 +637,14 @@ class ScriptSourceObject : public NativeObject
 {
     static const ClassOps classOps_;
 
+    static ScriptSourceObject* createInternal(ExclusiveContext* cx, ScriptSource* source,
+                                              HandleObject canonical);
+
+    bool isCanonical() const {
+      return &getReservedSlot(CANONICAL_SLOT).toObject() == this;
+    }
+    ScriptSourceObject* unwrappedCanonical() const;
+
   public:
     static const Class class_;
 
@@ -638,16 +675,61 @@ class ScriptSourceObject : public NativeObject
         return static_cast<JSScript*>(untyped);
     }
 
+    void setPrivate(JSRuntime* rt, const Value& value);
+
+    Value getPrivate() const {
+        return getReservedSlot(PRIVATE_SLOT);
+    }
+
+    Value canonicalPrivate() const {
+        Value value = getReservedSlot(PRIVATE_SLOT);
+        MOZ_ASSERT_IF(!isCanonical(), value.isUndefined());
+        return value;
+    }
+
   private:
-    static const uint32_t SOURCE_SLOT = 0;
-    static const uint32_t ELEMENT_SLOT = 1;
-    static const uint32_t ELEMENT_PROPERTY_SLOT = 2;
-    static const uint32_t INTRODUCTION_SCRIPT_SLOT = 3;
-    static const uint32_t RESERVED_SLOTS = 4;
+    enum {
+        SOURCE_SLOT = 0,
+        CANONICAL_SLOT,
+        ELEMENT_SLOT,
+        ELEMENT_PROPERTY_SLOT,
+        INTRODUCTION_SCRIPT_SLOT,
+        PRIVATE_SLOT,
+        RESERVED_SLOTS
+    };
 };
 
 enum GeneratorKind { NotGenerator, LegacyGenerator, StarGenerator };
 enum FunctionAsyncKind { SyncFunction, AsyncFunction };
+
+struct FieldInitializers
+{
+#ifdef DEBUG
+    bool valid : 1;
+#endif
+    // This struct will eventually have a vector of constant values for optimizing
+    // field initializers.
+    size_t numFieldInitializers;
+
+    explicit FieldInitializers(size_t numFieldInitializers)
+      :
+#ifdef DEBUG
+        valid(true),
+#endif
+        numFieldInitializers(numFieldInitializers) {
+    }
+
+    static FieldInitializers Invalid() { return FieldInitializers(); }
+
+  private:
+    FieldInitializers()
+      :
+#ifdef DEBUG
+        valid(false),
+#endif
+        numFieldInitializers(0) {
+    }
+};
 
 static inline unsigned
 GeneratorKindAsBits(GeneratorKind generatorKind) {
@@ -678,12 +760,12 @@ AsyncKindFromBits(unsigned val) {
  */
 template<XDRMode mode>
 bool
-XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript enclosingScript,
+XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScriptSource sourceObject,
           HandleFunction fun, MutableHandleScript scriptp);
 
 template<XDRMode mode>
 bool
-XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript enclosingScript,
+XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScriptSource sourceObject,
               HandleFunction fun, MutableHandle<LazyScript*> lazy);
 
 /*
@@ -791,7 +873,7 @@ class JSScript : public js::gc::TenuredCell
     friend
     bool
     js::XDRScript(js::XDRState<mode>* xdr, js::HandleScope enclosingScope,
-                  js::HandleScript enclosingScript, js::HandleFunction fun,
+                  js::HandleScriptSource sourceObject, js::HandleFunction fun,
                   js::MutableHandleScript scriptp);
 
     friend bool
@@ -800,6 +882,8 @@ class JSScript : public js::gc::TenuredCell
 
   private:
     js::SharedScriptData* scriptData_;
+
+    js::FieldInitializers fieldInitializers_ = js::FieldInitializers::Invalid();
   public:
     uint8_t*        data;      /* pointer to variable-length data array (see
                                    comment above Create() for details) */
@@ -1034,6 +1118,8 @@ class JSScript : public js::gc::TenuredCell
     bool isDerivedClassConstructor_:1;
     bool isDefaultClassConstructor_:1;
 
+    bool isFieldInitializer_:1;
+
     bool isAsync_:1;
 
     bool hasRest_:1;
@@ -1043,7 +1129,10 @@ class JSScript : public js::gc::TenuredCell
     // instead of private to suppress -Wunused-private-field compiler warnings.
   protected:
 #if JS_BITS_PER_WORD == 32
-    // Currently no padding is needed.
+#  ifndef DEBUG
+    // DEBUG is currently 4 bytes larger and doesn't need padding to gc::CellSize
+    uint32_t padding_;
+#  endif
 #endif
 
     //
@@ -1194,11 +1283,11 @@ class JSScript : public js::gc::TenuredCell
         return funLength_;
     }
 
-    size_t sourceStart() const {
+    uint32_t sourceStart() const {
         return sourceStart_;
     }
 
-    size_t sourceEnd() const {
+    uint32_t sourceEnd() const {
         return sourceEnd_;
     }
 
@@ -1372,6 +1461,10 @@ class JSScript : public js::gc::TenuredCell
         return isDerivedClassConstructor_;
     }
 
+    bool isFieldInitializer() const {
+        return isFieldInitializer_;
+    }
+
     /*
      * As an optimization, even when argsHasLocalBinding, the function prologue
      * may not need to create an arguments object. This is determined by
@@ -1398,6 +1491,11 @@ class JSScript : public js::gc::TenuredCell
     bool functionHasThisBinding() const {
         return functionHasThisBinding_;
     }
+
+    void setFieldInitializers(js::FieldInitializers fieldInitializers) {
+        fieldInitializers_ = fieldInitializers;
+    }
+    const js::FieldInitializers& getFieldInitializers() const { return fieldInitializers_; }
 
     /*
      * Arguments access (via JSOP_*ARG* opcodes) must access the canonical
@@ -1948,7 +2046,6 @@ namespace js {
 // bytecode from its source.
 class LazyScript : public gc::TenuredCell
 {
-  private:
     // If non-nullptr, the script has been compiled and this is a forwarding
     // pointer to the result. This is a weak pointer: after relazification, we
     // can collect the script if there are no other pointers to it.
@@ -1971,11 +2068,10 @@ class LazyScript : public gc::TenuredCell
     // Add padding so LazyScript is gc::Cell aligned. Make padding protected
     // instead of private to suppress -Wunused-private-field compiler warnings.
   protected:
-#if JS_BITS_PER_WORD == 32
+#if JS_BITS_PER_WORD == 32 && !(defined(XP_DARWIN) && defined(__ppc__))
     uint32_t padding;
 #endif
 
-  private:
     static const uint32_t NumClosedOverBindingsBits = 20;
     static const uint32_t NumInnerFunctionsBits = 20;
 
@@ -2007,14 +2103,18 @@ class LazyScript : public gc::TenuredCell
         uint32_t hasBeenCloned : 1;
         uint32_t treatAsRunOnce : 1;
         uint32_t isDerivedClassConstructor : 1;
+        uint32_t isFieldInitializer : 1;
         uint32_t needsHomeObject : 1;
         uint32_t hasRest : 1;
+        uint32_t hasModuleGoal : 1;
     };
 
     union {
         PackedView p_;
         uint64_t packedFields_;
     };
+
+    FieldInitializers fieldInitializers_;
 
     // Source location for the script.
     // See the comment in JSScript for the details.
@@ -2057,11 +2157,11 @@ class LazyScript : public gc::TenuredCell
     // The "script" argument to this function can be null.  If it's non-null,
     // then this LazyScript should be associated with the given JSScript.
     //
-    // The enclosingScript and enclosingScope arguments may be null if the
+    // The sourceObject and enclosingScope arguments may be null if the
     // enclosing function is also lazy.
     static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
                               HandleScript script, HandleScope enclosingScope,
-                              HandleScript enclosingScript,
+                              HandleScriptSource sourceObject,
                               uint64_t packedData, uint32_t begin, uint32_t end,
                               uint32_t toStringStart, uint32_t lineno, uint32_t column);
 
@@ -2159,6 +2259,22 @@ class LazyScript : public gc::TenuredCell
         p_.isExprBody = true;
     }
 
+    // This was added in Issue #2236 to compensate for the lack of
+    // Mozilla's ImmutableFlags feature, if ImmutableFlags ever gets
+    // ported remove the next 2 methods.
+    bool hasModuleGoal() const {
+        return p_.hasModuleGoal;
+    }
+
+    void setHasModuleGoal() {
+        p_.hasModuleGoal = true;
+    }
+
+    js::frontend::ParseGoal parseGoal() const {
+      return hasModuleGoal() ? js::frontend::ParseGoal::Module
+                             : js::frontend::ParseGoal::Script;
+    }
+
     bool strict() const {
         return p_.strict;
     }
@@ -2215,6 +2331,13 @@ class LazyScript : public gc::TenuredCell
         p_.isDerivedClassConstructor = true;
     }
 
+    bool isFieldInitializer() const {
+        return p_.isFieldInitializer;
+    }
+    void setIsFieldInitializer() {
+        p_.isFieldInitializer = true;
+    }
+
     bool needsHomeObject() const {
         return p_.needsHomeObject;
     }
@@ -2235,6 +2358,12 @@ class LazyScript : public gc::TenuredCell
     void setHasThisBinding() {
         p_.hasThisBinding = true;
     }
+
+    void setFieldInitializers(FieldInitializers fieldInitializers) {
+        fieldInitializers_ = fieldInitializers;
+    }
+
+    const FieldInitializers& getFieldInitializers() const { return fieldInitializers_; }
 
     const char* filename() const {
         return scriptSource()->filename();

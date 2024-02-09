@@ -111,11 +111,17 @@ StringBuffer::finishString()
     JS_STATIC_ASSERT(JSFatInlineString::MAX_LENGTH_LATIN1 < Latin1CharBuffer::InlineLength);
 
     if (isLatin1()) {
+        if (JSAtom* staticStr = cx->staticStrings().lookup(latin1Chars().begin(), len))
+            return staticStr;
+
         if (JSInlineString::lengthFits<Latin1Char>(len)) {
             mozilla::Range<const Latin1Char> range(latin1Chars().begin(), len);
             return NewInlineString<CanGC>(cx, range);
         }
     } else {
+        if (JSAtom* staticStr = cx->staticStrings().lookup(twoByteChars().begin(), len))
+            return staticStr;
+
         if (JSInlineString::lengthFits<char16_t>(len)) {
             mozilla::Range<const char16_t> range(twoByteChars().begin(), len);
             return NewInlineString<CanGC>(cx, range);
@@ -163,6 +169,13 @@ js::ValueToStringBufferSlow(JSContext* cx, const Value& arg, StringBuffer& sb)
     if (v.isSymbol()) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_SYMBOL_TO_STRING);
         return false;
+    }
+    if (v.isBigInt()) {
+        RootedBigInt i(cx, v.toBigInt());
+        JSLinearString* str = BigInt::toString(cx, i, 10);
+        if (!str)
+            return false;
+        return sb.append(str);
     }
     MOZ_ASSERT(v.isUndefined());
     return sb.append(cx->names().undefined);

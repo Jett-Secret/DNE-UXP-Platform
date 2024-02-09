@@ -99,6 +99,9 @@ class GeneratorObject : public NativeObject
     bool hasExpressionStack() const {
         return getFixedSlot(EXPRESSION_STACK_SLOT).isObject();
     }
+    bool isExpressionStackEmpty() const {
+        return expressionStack().getDenseInitializedLength() == 0;
+    }
     ArrayObject& expressionStack() const {
         return getFixedSlot(EXPRESSION_STACK_SLOT).toObject().as<ArrayObject>();
     }
@@ -223,7 +226,7 @@ bool GeneratorThrowOrClose(JSContext* cx, AbstractFramePtr frame, Handle<Generat
                            HandleValue val, uint32_t resumeKind);
 void SetReturnValueForClosingGenerator(JSContext* cx, AbstractFramePtr frame);
 
-MOZ_MUST_USE bool
+[[nodiscard]] bool
 CheckStarGeneratorResumptionValue(JSContext* cx, HandleValue v);
 
 } // namespace js

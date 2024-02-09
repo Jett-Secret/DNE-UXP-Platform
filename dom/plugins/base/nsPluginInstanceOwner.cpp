@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:set ts=2 sts=2 sw=2 et cin:
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -2937,6 +2936,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::CreateWidget(void)
     // Try to get a parent widget, on some platforms widget creation will fail without
     // a parent.
     nsCOMPtr<nsIWidget> parentWidget;
+#ifdef MOZ_ENABLE_NPAPI
     nsIDocument *doc = nullptr;
     nsCOMPtr<nsIContent> content = do_QueryReferent(mContent);
     if (content) {
@@ -2960,6 +2960,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::CreateWidget(void)
       }
 #endif // XP_MACOSX
     }
+#endif // MOZ_ENABLE_NPAPI
 
 #ifndef XP_MACOSX
     // A failure here is terminal since we can't fall back on the non-e10s code

@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -384,6 +383,7 @@ enum SilverlightPresence {
 static SilverlightPresence
 CheckSilverlight()
 {
+#ifdef MOZ_ENABLE_NPAPI
   MOZ_ASSERT(NS_IsMainThread());
   RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
   if (!pluginHost) {
@@ -399,7 +399,7 @@ CheckSilverlight()
       }
     }
   }
-
+#endif
   return eNoSilverlight;
 }
 
@@ -839,6 +839,7 @@ DecoderDoctorDiagnostics::GetDescription() const
       if (mFFmpegFailedToLoad) {
         s += ", Linux platform decoder failed to load";
       }
+#ifdef MOZ_GMP
       if (mGMPPDMFailedToStartup) {
         s += ", GMP PDM failed to startup";
       } else if (!mGMP.IsEmpty()) {
@@ -846,6 +847,7 @@ DecoderDoctorDiagnostics::GetDescription() const
         s += mGMP;
         s += "'";
       }
+#endif
       break;
     case eMediaKeySystemAccessRequest:
       s = "key system='";

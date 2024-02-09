@@ -20,7 +20,6 @@ DIRS += ['/modules/libmar',
          '/other-licenses/bsdiff']
 
 DIRS += [
-    '/config/external/freetype2',
     '/xpcom',
     '/modules/libpref',
     '/intl',
@@ -134,11 +133,6 @@ if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
 DIRS += [
     '/tools/quitter',
 ]
-
-if CONFIG['MOZ_EME']:
-    DIRS += [
-    '/media/gmp-clearkey/0.1',
-    ]
 
 if CONFIG['ENABLE_TESTS']:
     DIRS += [

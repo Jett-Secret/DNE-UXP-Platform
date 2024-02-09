@@ -35,6 +35,12 @@
 #include "gc/Marking.h"
 #include "jit/Ion.h"
 #include "js/CharacterEncoding.h"
+#ifdef JS_SIMULATOR_ARM64
+# include "jit/arm64/vixl/Simulator-vixl.h"
+#endif
+#ifdef JS_SIMULATOR_ARM
+# include "jit/arm/Simulator-arm.h"
+#endif
 #include "vm/HelperThreads.h"
 #include "vm/Shape.h"
 
@@ -236,7 +242,15 @@ js::ReportOutOfMemory(ExclusiveContext* cxArg)
     if (JS::OutOfMemoryCallback oomCallback = cx->runtime()->oomCallback)
         oomCallback(cx, cx->runtime()->oomCallbackData);
 
-    cx->setPendingException(StringValue(cx->names().outOfMemory));
+    RootedValue oomMessage(cx, StringValue(cx->names().outOfMemory));
+    cx->setPendingException(oomMessage, nullptr);
+}
+
+mozilla::GenericErrorResult<OOM&>
+js::ReportOutOfMemoryResult(ExclusiveContext* cx)
+{
+    ReportOutOfMemory(cx);
+    return cx->alreadyReportedOOM();
 }
 
 void
@@ -1003,11 +1017,40 @@ ExclusiveContext::recoverFromOutOfMemory()
         task->outOfMemory = false;
 }
 
+JS::Error ExclusiveContext::reportedError;
+JS::OOM ExclusiveContext::reportedOOM;
+
+mozilla::GenericErrorResult<OOM&>
+ExclusiveContext::alreadyReportedOOM()
+{
+#ifdef DEBUG
+    if (JSContext* maybecx = maybeJSContext()) {
+        MOZ_ASSERT(maybecx->isThrowingOutOfMemory());
+    } else {
+        // Keep in sync with addPendingOutOfMemory.
+        if (ParseTask* task = helperThread()->parseTask())
+            MOZ_ASSERT(task->outOfMemory);
+    }
+#endif
+    return mozilla::MakeGenericErrorResult(reportedOOM);
+}
+
+mozilla::GenericErrorResult<JS::Error&>
+ExclusiveContext::alreadyReportedError()
+{
+#ifdef DEBUG
+    if (JSContext* maybecx = maybeJSContext())
+        MOZ_ASSERT(maybecx->isExceptionPending());
+#endif
+    return mozilla::MakeGenericErrorResult(reportedError);
+}
+
 JSContext::JSContext(JSRuntime* parentRuntime)
   : ExclusiveContext(this, &this->JSRuntime::mainThread, Context_JS, JS::ContextOptions()),
     JSRuntime(parentRuntime),
     throwing(false),
     unwrappedException_(this),
+    unwrappedExceptionStack_(this),
     overRecursed_(false),
     propagatingForcedReturn_(false),
     liveVolatileJitFrameIterators_(nullptr),
@@ -1033,6 +1076,24 @@ JSContext::~JSContext()
     MOZ_ASSERT(!resolvingList);
 }
 
+
+void
+JSContext::setPendingExceptionAndCaptureStack(HandleValue value)
+{
+    static const size_t MAX_REPORTED_STACK_DEPTH = 1u << 7;
+
+    RootedObject stack(this);
+    if (!CaptureCurrentStack(this, &stack, JS::StackCapture(JS::MaxFrames(MAX_REPORTED_STACK_DEPTH)))) {
+        clearPendingException();
+    }
+
+    RootedSavedFrame nstack(this);
+    if (stack) {
+        nstack = &stack->as<SavedFrame>();
+    }
+    setPendingException(value, nstack);
+}
+
 bool
 JSContext::getPendingException(MutableHandleValue rval)
 {
@@ -1040,14 +1101,21 @@ JSContext::getPendingException(MutableHandleValue rval)
     rval.set(unwrappedException_);
     if (IsAtomsCompartment(compartment()))
         return true;
+    RootedSavedFrame stack(this, unwrappedExceptionStack_);
     bool wasOverRecursed = overRecursed_;
     clearPendingException();
     if (!compartment()->wrap(this, rval))
         return false;
     assertSameCompartment(this, rval);
-    setPendingException(rval);
+    setPendingException(rval, stack);
     overRecursed_ = wasOverRecursed;
     return true;
+}
+
+SavedFrame*
+JSContext::getPendingExceptionStack()
+{
+    return unwrappedExceptionStack_;
 }
 
 bool

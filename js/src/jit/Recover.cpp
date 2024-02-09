@@ -14,7 +14,6 @@
 #include "jsstr.h"
 
 #include "builtin/RegExp.h"
-#include "builtin/SIMD.h"
 #include "builtin/TypedObject.h"
 
 #include "gc/Heap.h"
@@ -164,13 +163,13 @@ bool
 RBitNot::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue operand(cx, iter.read());
+    RootedValue result(cx);
 
-    int32_t result;
-    if (!js::BitNot(cx, operand, &result))
+    if (!js::BitNot(cx, &operand, &result)) {
         return false;
+    }
 
-    RootedValue rootedResult(cx, js::Int32Value(result));
-    iter.storeInstructionResult(rootedResult);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -190,14 +189,14 @@ RBitAnd::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
-    int32_t result;
+    RootedValue result(cx);
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
-    if (!js::BitAnd(cx, lhs, rhs, &result))
+    if (!js::BitAnd(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue rootedResult(cx, js::Int32Value(result));
-    iter.storeInstructionResult(rootedResult);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -217,14 +216,14 @@ RBitOr::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
-    int32_t result;
+    RootedValue result(cx);
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
-    if (!js::BitOr(cx, lhs, rhs, &result))
+    if (!js::BitOr(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue asValue(cx, js::Int32Value(result));
-    iter.storeInstructionResult(asValue);
+    iter.storeInstructionResult(result);;
     return true;
 }
 
@@ -244,13 +243,13 @@ RBitXor::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
+    RootedValue result(cx);
 
-    int32_t result;
-    if (!js::BitXor(cx, lhs, rhs, &result))
+    if (!js::BitXor(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue rootedResult(cx, js::Int32Value(result));
-    iter.storeInstructionResult(rootedResult);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -270,14 +269,14 @@ RLsh::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
-    int32_t result;
+    RootedValue result(cx);
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
-    if (!js::BitLsh(cx, lhs, rhs, &result))
+    if (!js::BitLsh(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue asValue(cx, js::Int32Value(result));
-    iter.storeInstructionResult(asValue);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -297,14 +296,14 @@ RRsh::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
+    RootedValue result(cx);
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
-    int32_t result;
-    if (!js::BitRsh(cx, lhs, rhs, &result))
+    if (!js::BitRsh(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue rootedResult(cx, js::Int32Value(result));
-    iter.storeInstructionResult(rootedResult);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -327,40 +326,41 @@ RUrsh::recover(JSContext* cx, SnapshotIterator& iter) const
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
     RootedValue result(cx);
-    if (!js::UrshOperation(cx, lhs, rhs, &result))
+    if (!js::UrshOperation(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
 }
 
 bool
-MSignExtend::writeRecoverData(CompactBufferWriter& writer) const
+MSignExtendInt32::writeRecoverData(CompactBufferWriter& writer) const
 {
     MOZ_ASSERT(canRecoverOnBailout());
-    writer.writeUnsigned(uint32_t(RInstruction::Recover_SignExtend));
+    writer.writeUnsigned(uint32_t(RInstruction::Recover_SignExtendInt32));
     MOZ_ASSERT(Mode(uint8_t(mode_)) == mode_);
     writer.writeByte(uint8_t(mode_));
     return true;
 }
 
-RSignExtend::RSignExtend(CompactBufferReader& reader)
+RSignExtendInt32::RSignExtendInt32(CompactBufferReader& reader)
 {
     mode_ = reader.readByte();
 }
 
 bool
-RSignExtend::recover(JSContext* cx, SnapshotIterator& iter) const
+RSignExtendInt32::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue operand(cx, iter.read());
 
     int32_t result;
-    switch (MSignExtend::Mode(mode_)) {
-      case MSignExtend::Byte:
+    switch (MSignExtendInt32::Mode(mode_)) {
+      case MSignExtendInt32::Byte:
         if (!js::SignExtendOperation<int8_t>(cx, operand, &result))
             return false;
         break;
-      case MSignExtend::Half:
+      case MSignExtendInt32::Half:
         if (!js::SignExtendOperation<int16_t>(cx, operand, &result))
             return false;
         break;
@@ -778,7 +778,7 @@ RPow::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(base.isNumber() && power.isNumber());
-    if (!js::math_pow_handle(cx, base, power, &result))
+    if (!js::PowValues(cx, &base, &power, &result))
         return false;
 
     iter.storeInstructionResult(result);
@@ -805,7 +805,7 @@ RPowHalf::recover(JSContext* cx, SnapshotIterator& iter) const
     power.setNumber(0.5);
 
     MOZ_ASSERT(base.isNumber());
-    if (!js::math_pow_handle(cx, base, power, &result))
+    if (!js::PowValues(cx, &base, &power, &result))
         return false;
 
     iter.storeInstructionResult(result);
@@ -1437,79 +1437,6 @@ RLambda::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedFunction fun(cx, &iter.read().toObject().as<JSFunction>());
 
     JSObject* resultObject = js::Lambda(cx, fun, scopeChain);
-    if (!resultObject)
-        return false;
-
-    RootedValue result(cx);
-    result.setObject(*resultObject);
-    iter.storeInstructionResult(result);
-    return true;
-}
-
-bool
-MSimdBox::writeRecoverData(CompactBufferWriter& writer) const
-{
-    MOZ_ASSERT(canRecoverOnBailout());
-    writer.writeUnsigned(uint32_t(RInstruction::Recover_SimdBox));
-    static_assert(unsigned(SimdType::Count) < 0x100, "assuming SimdType fits in 8 bits");
-    writer.writeByte(uint8_t(simdType()));
-    return true;
-}
-
-RSimdBox::RSimdBox(CompactBufferReader& reader)
-{
-    type_ = reader.readByte();
-}
-
-bool
-RSimdBox::recover(JSContext* cx, SnapshotIterator& iter) const
-{
-    JSObject* resultObject = nullptr;
-    RValueAllocation a = iter.readAllocation();
-    MOZ_ASSERT(iter.allocationReadable(a));
-    MOZ_ASSERT_IF(a.mode() == RValueAllocation::ANY_FLOAT_REG, a.fpuReg().isSimd128());
-    const FloatRegisters::RegisterContent* raw = iter.floatAllocationPointer(a);
-    switch (SimdType(type_)) {
-      case SimdType::Bool8x16:
-        resultObject = js::CreateSimd<Bool8x16>(cx, (const Bool8x16::Elem*) raw);
-        break;
-      case SimdType::Int8x16:
-        resultObject = js::CreateSimd<Int8x16>(cx, (const Int8x16::Elem*) raw);
-        break;
-      case SimdType::Uint8x16:
-        resultObject = js::CreateSimd<Uint8x16>(cx, (const Uint8x16::Elem*) raw);
-        break;
-      case SimdType::Bool16x8:
-        resultObject = js::CreateSimd<Bool16x8>(cx, (const Bool16x8::Elem*) raw);
-        break;
-      case SimdType::Int16x8:
-        resultObject = js::CreateSimd<Int16x8>(cx, (const Int16x8::Elem*) raw);
-        break;
-      case SimdType::Uint16x8:
-        resultObject = js::CreateSimd<Uint16x8>(cx, (const Uint16x8::Elem*) raw);
-        break;
-      case SimdType::Bool32x4:
-        resultObject = js::CreateSimd<Bool32x4>(cx, (const Bool32x4::Elem*) raw);
-        break;
-      case SimdType::Int32x4:
-        resultObject = js::CreateSimd<Int32x4>(cx, (const Int32x4::Elem*) raw);
-        break;
-      case SimdType::Uint32x4:
-        resultObject = js::CreateSimd<Uint32x4>(cx, (const Uint32x4::Elem*) raw);
-        break;
-      case SimdType::Float32x4:
-        resultObject = js::CreateSimd<Float32x4>(cx, (const Float32x4::Elem*) raw);
-        break;
-      case SimdType::Float64x2:
-        MOZ_CRASH("NYI, RSimdBox of Float64x2");
-        break;
-      case SimdType::Bool64x2:
-        MOZ_CRASH("NYI, RSimdBox of Bool64x2");
-        break;
-      case SimdType::Count:
-        MOZ_CRASH("RSimdBox of Count is unreachable");
-    }
-
     if (!resultObject)
         return false;
 

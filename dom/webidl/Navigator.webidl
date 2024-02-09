@@ -108,8 +108,10 @@ partial interface Navigator {
 partial interface Navigator {
   [Throws]
   readonly attribute MimeTypeArray mimeTypes;
+#ifdef MOZ_ENABLE_NPAPI
   [Throws]
   readonly attribute PluginArray plugins;
+#endif
 };
 
 // https://globalprivacycontrol.github.io/gpc-spec/
@@ -296,7 +298,7 @@ partial interface Navigator {
 partial interface Navigator {
   [Throws, Pref="beacon.enabled"]
   boolean sendBeacon(DOMString url,
-                     optional (ArrayBufferView or Blob or DOMString or FormData)? data = null);
+                     optional BodyInit? data = null);
 };
 
 partial interface Navigator {
@@ -304,16 +306,13 @@ partial interface Navigator {
   readonly attribute LegacyMozTCPSocket mozTCPSocket;
 };
 
-#ifdef MOZ_EME
-partial interface Navigator {
-  [Pref="media.eme.apiVisible", NewObject]
-  Promise<MediaKeySystemAccess>
-  requestMediaKeySystemAccess(DOMString keySystem,
-                              sequence<MediaKeySystemConfiguration> supportedConfigurations);
-};
-#endif
-
 [NoInterfaceObject, Exposed=(Window,Worker)]
 interface NavigatorConcurrentHardware {
   readonly attribute unsigned long long hardwareConcurrency;
+};
+
+// https://www.w3.org/TR/clipboard-apis/#navigator-interface
+partial interface Navigator {
+  [Pref="dom.events.asyncClipboard", SecureContext, SameObject]
+  readonly attribute Clipboard clipboard;
 };

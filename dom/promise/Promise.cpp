@@ -227,15 +227,6 @@ Promise::Then(JSContext* aCx,
   aRetval.setObject(*retval);
 }
 
-// We need a dummy function to pass to JS::NewPromiseObject.
-static bool
-DoNothingPromiseExecutor(JSContext*, unsigned aArgc, JS::Value* aVp)
-{
-  JS::CallArgs args = CallArgsFromVp(aArgc, aVp);
-  args.rval().setUndefined();
-  return true;
-}
-
 void
 Promise::CreateWrapper(JS::Handle<JSObject*> aDesiredProto, ErrorResult& aRv)
 {
@@ -246,17 +237,7 @@ Promise::CreateWrapper(JS::Handle<JSObject*> aDesiredProto, ErrorResult& aRv)
   }
   JSContext* cx = jsapi.cx();
 
-  JSFunction* doNothingFunc =
-    JS_NewFunction(cx, DoNothingPromiseExecutor, /* nargs = */ 2,
-                   /* flags = */ 0, nullptr);
-  if (!doNothingFunc) {
-    JS_ClearPendingException(cx);
-    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return;
-  }
-
-  JS::Rooted<JSObject*> doNothingObj(cx, JS_GetFunctionObject(doNothingFunc));
-  mPromiseObj = JS::NewPromiseObject(cx, doNothingObj, aDesiredProto);
+  mPromiseObj = JS::NewPromiseObject(cx, nullptr, aDesiredProto);
   if (!mPromiseObj) {
     JS_ClearPendingException(cx);
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
@@ -525,110 +506,6 @@ Promise::ReportRejectedPromise(JSContext* aCx, JS::HandleObject aPromise)
 
   // Now post an event to do the real reporting async
   NS_DispatchToMainThread(new AsyncErrorReporter(xpcReport));
-}
-
-bool
-Promise::PerformMicroTaskCheckpoint()
-{
-  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-  CycleCollectedJSContext* context = CycleCollectedJSContext::Get();
-
-  // On the main thread, we always use the main promise micro task queue.
-  std::queue<nsCOMPtr<nsIRunnable>>& microtaskQueue =
-    context->GetPromiseMicroTaskQueue();
-
-  if (microtaskQueue.empty()) {
-    return false;
-  }
-
-  AutoSlowOperation aso;
-
-  do {
-    nsCOMPtr<nsIRunnable> runnable = microtaskQueue.front().forget();
-    MOZ_ASSERT(runnable);
-
-    // This function can re-enter, so we remove the element before calling.
-    microtaskQueue.pop();
-    nsresult rv = runnable->Run();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return false;
-    }
-    aso.CheckForInterrupt();
-    context->AfterProcessMicrotask();
-  } while (!microtaskQueue.empty());
-
-  return true;
-}
-
-void
-Promise::PerformWorkerMicroTaskCheckpoint()
-{
-  MOZ_ASSERT(!NS_IsMainThread(), "Wrong thread!");
-
-  CycleCollectedJSContext* context = CycleCollectedJSContext::Get();
-  if (!context) {
-    return;
-  }
-
-  for (;;) {
-    // For a normal microtask checkpoint, we try to use the debugger microtask
-    // queue first. If the debugger queue is empty, we use the normal microtask
-    // queue instead.
-    std::queue<nsCOMPtr<nsIRunnable>>* microtaskQueue =
-      &context->GetDebuggerPromiseMicroTaskQueue();
-
-    if (microtaskQueue->empty()) {
-      microtaskQueue = &context->GetPromiseMicroTaskQueue();
-      if (microtaskQueue->empty()) {
-        break;
-      }
-    }
-
-    nsCOMPtr<nsIRunnable> runnable = microtaskQueue->front().forget();
-    MOZ_ASSERT(runnable);
-
-    // This function can re-enter, so we remove the element before calling.
-    microtaskQueue->pop();
-    nsresult rv = runnable->Run();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return;
-    }
-    context->AfterProcessMicrotask();
-  }
-}
-
-void
-Promise::PerformWorkerDebuggerMicroTaskCheckpoint()
-{
-  MOZ_ASSERT(!NS_IsMainThread(), "Wrong thread!");
-
-  CycleCollectedJSContext* context = CycleCollectedJSContext::Get();
-  if (!context) {
-    return;
-  }
-
-  for (;;) {
-    // For a debugger microtask checkpoint, we always use the debugger microtask
-    // queue.
-    std::queue<nsCOMPtr<nsIRunnable>>* microtaskQueue =
-      &context->GetDebuggerPromiseMicroTaskQueue();
-
-    if (microtaskQueue->empty()) {
-      break;
-    }
-
-    nsCOMPtr<nsIRunnable> runnable = microtaskQueue->front().forget();
-    MOZ_ASSERT(runnable);
-
-    // This function can re-enter, so we remove the element before calling.
-    microtaskQueue->pop();
-    nsresult rv = runnable->Run();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return;
-    }
-    context->AfterProcessMicrotask();
-  }
 }
 
 JSObject*

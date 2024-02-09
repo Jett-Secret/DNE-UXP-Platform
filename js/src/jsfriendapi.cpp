@@ -9,6 +9,8 @@
 
 #include <stdint.h>
 
+#include "builtin/BigInt.h"
+
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsgc.h"
@@ -299,6 +301,8 @@ js::GetBuiltinClass(JSContext* cx, HandleObject obj, ESClass* cls)
         *cls = ESClass::Arguments;
     else if (obj->is<ErrorObject>())
         *cls = ESClass::Error;
+    else if (obj->is<BigIntObject>())
+        *cls = ESClass::BigInt;
     else
         *cls = ESClass::Other;
 
@@ -364,6 +368,12 @@ JS_FRIEND_API(void)
 js::AssertSameCompartment(JSContext* cx, JSObject* obj)
 {
     assertSameCompartment(cx, obj);
+}
+
+JS_FRIEND_API(void)
+js::AssertSameCompartment(JSContext* cx, JS::HandleValue v)
+{
+    assertSameCompartment(cx, v);
 }
 
 #ifdef DEBUG
@@ -1319,6 +1329,15 @@ js::GetAllocationMetadata(JSObject* obj)
     if (map)
         return map->lookup(obj);
     return nullptr;
+}
+
+JS_FRIEND_API(JS::Value)
+js::MaybeGetScriptPrivate(JSObject* object) {
+  if (!object->is<ScriptSourceObject>()) {
+    return UndefinedValue();
+  }
+
+  return object->as<ScriptSourceObject>().canonicalPrivate();
 }
 
 JS_FRIEND_API(bool)

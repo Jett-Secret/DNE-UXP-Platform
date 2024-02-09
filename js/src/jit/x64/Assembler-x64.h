@@ -225,7 +225,9 @@ static_assert(JitStackAlignment % sizeof(Value) == 0 && JitStackValueAlignment >
 // this architecture or not. Rather than a method in the LIRGenerator, it is
 // here such that it is accessible from the entire codebase. Once full support
 // for SIMD is reached on all tier-1 platforms, this constant can be deleted.
-static constexpr bool SupportsSimd = true;
+// XXX: As of Issue #2307 this is false and will no longer compile with true.
+//      This should eventually be removed.
+static constexpr bool SupportsSimd = false;
 static constexpr uint32_t SimdMemoryAlignment = 16;
 
 static_assert(CodeAlignment % SimdMemoryAlignment == 0,
@@ -470,6 +472,9 @@ class Assembler : public AssemblerX86Shared
 
     void movsbq(const Operand& src, Register dest) {
         switch (src.kind()) {
+          case Operand::REG:
+            masm.movsbq_rr(src.reg(), dest.encoding());
+            break;
           case Operand::MEM_REG_DISP:
             masm.movsbq_mr(src.disp(), src.base(), dest.encoding());
             break;
@@ -489,6 +494,9 @@ class Assembler : public AssemblerX86Shared
 
     void movswq(const Operand& src, Register dest) {
         switch (src.kind()) {
+          case Operand::REG:
+            masm.movswq_rr(src.reg(), dest.encoding());
+            break;
           case Operand::MEM_REG_DISP:
             masm.movswq_mr(src.disp(), src.base(), dest.encoding());
             break;

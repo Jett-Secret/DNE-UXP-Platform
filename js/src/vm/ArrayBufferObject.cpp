@@ -264,27 +264,24 @@ ArrayBufferObject::fun_isView(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-/*
- * new ArrayBuffer(byteLength)
- */
+
+// ES2017 draft 24.1.2.1
 bool
 ArrayBufferObject::class_constructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
+    // Step 1.
     if (!ThrowIfNotConstructing(cx, args, "ArrayBuffer"))
         return false;
 
-    int32_t nbytes = 0;
-    if (argc > 0 && !ToInt32(cx, args[0], &nbytes))
+    // Step 2.
+    uint64_t byteLength;
+    if (!ToIndex(cx, args.get(0), &byteLength))
         return false;
 
-    if (nbytes < 0) {
-        /*
-         * We're just not going to support arrays that are bigger than what will fit
-         * as an integer value; if someone actually ever complains (validly), then we
-         * can fix.
-         */
+    // Non-standard: Refuse to allocate buffers larger than ~2 GiB.
+    if (byteLength > INT32_MAX) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_ARRAY_LENGTH);
         return false;
     }
@@ -294,7 +291,7 @@ ArrayBufferObject::class_constructor(JSContext* cx, unsigned argc, Value* vp)
     if (!GetPrototypeFromConstructor(cx, newTarget, &proto))
         return false;
 
-    JSObject* bufobj = create(cx, uint32_t(nbytes), proto);
+    JSObject* bufobj = create(cx, uint32_t(byteLength), proto);
     if (!bufobj)
         return false;
     args.rval().setObject(*bufobj);
@@ -551,7 +548,7 @@ class js::WasmArrayRawBuffer
     }
 #endif
 
-    MOZ_MUST_USE bool growToSizeInPlace(uint32_t oldSize, uint32_t newSize) {
+    [[nodiscard]] bool growToSizeInPlace(uint32_t oldSize, uint32_t newSize) {
         MOZ_ASSERT(newSize >= oldSize);
         MOZ_ASSERT_IF(maxSize(), newSize <= maxSize().value());
         MOZ_ASSERT(newSize <= mappedSize());
@@ -780,8 +777,8 @@ ArrayBufferObject::prepareForAsmJS(JSContext* cx, Handle<ArrayBufferObject*> buf
             return true;
 
         // Non-prepared-for-asm.js wasm buffers can be detached at any time.
-        // This error can only be triggered for SIMD.js (which isn't shipping)
-        // on !WASM_HUGE_MEMORY so this error is only visible in testing.
+        // This error can only be triggered for Atomics on !WASM_HUGE_MEMORY,
+        // so this error is only visible in testing.
         if (buffer->isWasm() || buffer->isPreparedForAsmJS())
             return false;
 
@@ -1258,15 +1255,16 @@ ArrayBufferObject::finalize(FreeOp* fop, JSObject* obj)
 }
 
 /* static */ void
-ArrayBufferObject::copyData(Handle<ArrayBufferObject*> toBuffer,
-                            Handle<ArrayBufferObject*> fromBuffer,
-                            uint32_t fromIndex, uint32_t count)
+ArrayBufferObject::copyData(Handle<ArrayBufferObject*> toBuffer, uint32_t toIndex,
+                            Handle<ArrayBufferObject*> fromBuffer, uint32_t fromIndex,
+                            uint32_t count)
 {
     MOZ_ASSERT(toBuffer->byteLength() >= count);
+    MOZ_ASSERT(toBuffer->byteLength() >= toIndex + count);
     MOZ_ASSERT(fromBuffer->byteLength() >= fromIndex);
     MOZ_ASSERT(fromBuffer->byteLength() >= fromIndex + count);
 
-    memcpy(toBuffer->dataPointer(), fromBuffer->dataPointer() + fromIndex, count);
+    memcpy(toBuffer->dataPointer() + toIndex, fromBuffer->dataPointer() + fromIndex, count);
 }
 
 /* static */ void
@@ -1891,6 +1889,17 @@ JS_GetArrayBufferViewByteLength(JSObject* obj)
     return obj->is<DataViewObject>()
            ? obj->as<DataViewObject>().byteLength()
            : obj->as<TypedArrayObject>().byteLength();
+}
+
+JS_FRIEND_API(uint32_t)
+JS_GetArrayBufferViewByteOffset(JSObject* obj)
+{
+    obj = CheckedUnwrap(obj);
+    if (!obj)
+        return 0;
+    return obj->is<DataViewObject>()
+           ? obj->as<DataViewObject>().byteOffset()
+           : obj->as<TypedArrayObject>().byteOffset();
 }
 
 JS_FRIEND_API(JSObject*)

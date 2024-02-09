@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: sw=4 ts=4 et :
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -34,8 +33,7 @@ public:
   virtual GMPErr GMPInit(const GMPPlatformAPI* aPlatformAPI) = 0;
   virtual GMPErr GMPGetAPI(const char* aAPIName,
                            void* aHostAPI,
-                           void** aPluginAPI,
-                           uint32_t aDecryptorId) = 0;
+                           void** aPluginAPI) = 0;
   virtual void GMPShutdown() = 0;
   virtual void GMPSetNodeId(const char* aNodeId, uint32_t aLength) = 0;
 };
@@ -78,8 +76,7 @@ public:
   // Retrieves an interface pointer from the GMP.
   virtual GMPErr GetAPI(const char* aAPIName,
                         void* aHostAPI,
-                        void** aPluginAPI,
-                        uint32_t aDecryptorId) = 0;
+                        void** aPluginAPI) = 0;
 
   // Calls the GMPShutdown function exported by the GMP lib, and unloads the
   // plugin library.

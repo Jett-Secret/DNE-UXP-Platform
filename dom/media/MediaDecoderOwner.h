@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -142,14 +141,6 @@ public:
   // The decoder owner should call Shutdown() on the decoder and drop the
   // reference to the decoder to prevent further calls into the decoder.
   virtual void NotifyXPCOMShutdown() = 0;
-
-#ifdef MOZ_EME
-  // Dispatches a "encrypted" event to the HTMLMediaElement, with the
-  // provided init data. Actual dispatch may be delayed until HAVE_METADATA.
-  // Main thread only.
-  virtual void DispatchEncrypted(const nsTArray<uint8_t>& aInitData,
-                                 const nsAString& aInitDataType) = 0;
-#endif
 };
 
 } // namespace mozilla

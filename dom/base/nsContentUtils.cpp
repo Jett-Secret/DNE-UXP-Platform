@@ -23,7 +23,9 @@
 #include "Layers.h"
 #include "MediaDecoder.h"
 // nsNPAPIPluginInstance must be included before nsIDocument.h, which is included in mozAutoDocUpdate.h.
+#ifdef MOZ_ENABLE_NPAPI
 #include "nsNPAPIPluginInstance.h"
+#endif
 #include "gfxDrawable.h"
 #include "gfxPrefs.h"
 #include "ImageOps.h"
@@ -39,6 +41,8 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/DOMException.h"
+#include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/FileSystemSecurity.h"
@@ -47,6 +51,7 @@
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/ipc/BlobParent.h"
+#include "mozilla/dom/MessagePort.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/TabParent.h"
@@ -2248,6 +2253,34 @@ nsContentUtils::ContentIsHostIncludingDescendantOf(
   return false;
 }
 
+bool
+nsContentUtils::ContentIsShadowIncludingDescendantOf(
+  const nsINode* aPossibleDescendant, const nsINode* aPossibleAncestor)
+{
+  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
+  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
+
+  if (aPossibleAncestor == aPossibleDescendant->GetComposedDoc()) {
+    return true;
+  }
+
+  do {
+    if (aPossibleDescendant == aPossibleAncestor) {
+      return true;
+    }
+
+    if (aPossibleDescendant->NodeType() == nsIDOMNode::DOCUMENT_FRAGMENT_NODE) {
+      ShadowRoot* shadowRoot =
+        ShadowRoot::FromNode(const_cast<nsINode*>(aPossibleDescendant));
+      aPossibleDescendant = shadowRoot ? shadowRoot->GetHost() : nullptr;
+    } else {
+      aPossibleDescendant = aPossibleDescendant->GetParentNode();
+    }
+  } while (aPossibleDescendant);
+
+  return false;
+}
+
 // static
 bool
 nsContentUtils::ContentIsCrossDocDescendantOf(nsINode* aPossibleDescendant,
@@ -2266,6 +2299,30 @@ nsContentUtils::ContentIsCrossDocDescendantOf(nsINode* aPossibleDescendant,
   return false;
 }
 
+// static
+nsINode*
+nsContentUtils::Retarget(nsINode* aTargetA, nsINode* aTargetB)
+{
+  while (true && aTargetA) {
+    // If A's root is not a shadow root...
+    nsINode* root = aTargetA->SubtreeRoot();
+    // TODO: replace with IsShadowRoot() check once bug 1427511 lands.
+    if (!ShadowRoot::FromNode(root)) {
+      // ...then return A.
+      return aTargetA;
+    }
+
+    // or A's root is a shadow-including inclusive ancestor of B...
+    if (nsContentUtils::ContentIsShadowIncludingDescendantOf(aTargetB, root)) {
+      // ...then return A.
+      return aTargetA;
+    }
+
+    aTargetA = ShadowRoot::FromNode(root)->GetHost();
+  }
+
+  return nullptr;
+}
 
 // static
 nsresult
@@ -2340,34 +2397,35 @@ nsContentUtils::GetCommonAncestor(nsIDOMNode *aNode,
   return CallQueryInterface(common, aCommonAncestor);
 }
 
-// static
-nsINode*
-nsContentUtils::GetCommonAncestor(nsINode* aNode1,
-                                  nsINode* aNode2)
+template <typename Node, typename GetParentFunc>
+static Node*
+GetCommonAncestorInternal(Node* aNode1,
+                          Node* aNode2,
+                          GetParentFunc aGetParentFunc)
 {
   if (aNode1 == aNode2) {
     return aNode1;
   }
 
   // Build the chain of parents
-  AutoTArray<nsINode*, 30> parents1, parents2;
+  AutoTArray<Node*, 30> parents1, parents2;
   do {
     parents1.AppendElement(aNode1);
-    aNode1 = aNode1->GetParentNode();
+    aNode1 = aGetParentFunc(aNode1);
   } while (aNode1);
   do {
     parents2.AppendElement(aNode2);
-    aNode2 = aNode2->GetParentNode();
+    aNode2 = aGetParentFunc(aNode2);
   } while (aNode2);
 
   // Find where the parent chain differs
   uint32_t pos1 = parents1.Length();
   uint32_t pos2 = parents2.Length();
-  nsINode* parent = nullptr;
+  Node* parent = nullptr;
   uint32_t len;
   for (len = std::min(pos1, pos2); len > 0; --len) {
-    nsINode* child1 = parents1.ElementAt(--pos1);
-    nsINode* child2 = parents2.ElementAt(--pos2);
+    Node* child1 = parents1.ElementAt(--pos1);
+    Node* child2 = parents2.ElementAt(--pos2);
     if (child1 != child2) {
       break;
     }
@@ -2375,6 +2433,25 @@ nsContentUtils::GetCommonAncestor(nsINode* aNode1,
   }
 
   return parent;
+}
+
+/* static */
+nsINode*
+nsContentUtils::GetCommonAncestor(nsINode* aNode1, nsINode* aNode2)
+{
+  return GetCommonAncestorInternal(aNode1, aNode2, [](nsINode* aNode) {
+    return aNode->GetParentNode();
+  });
+}
+
+/* static */
+nsIContent*
+nsContentUtils::GetCommonFlattenedTreeAncestor(nsIContent* aContent1,
+                                               nsIContent* aContent2)
+{
+  return GetCommonAncestorInternal(aContent1, aContent2, [](nsIContent* aContent) {
+    return aContent->GetFlattenedTreeParent();
+  });
 }
 
 // static
@@ -5363,10 +5440,18 @@ nsContentUtils::RunInStableState(already_AddRefed<nsIRunnable> aRunnable)
 
 /* static */
 void
-nsContentUtils::RunInMetastableState(already_AddRefed<nsIRunnable> aRunnable)
+nsContentUtils::AddPendingIDBTransaction(already_AddRefed<nsIRunnable> aTransaction)
 {
   MOZ_ASSERT(CycleCollectedJSContext::Get(), "Must be on a script thread!");
-  CycleCollectedJSContext::Get()->RunInMetastableState(Move(aRunnable));
+  CycleCollectedJSContext::Get()->AddPendingIDBTransaction(Move(aTransaction));
+}
+
+/* static */
+bool
+nsContentUtils::IsInStableOrMetaStableState()
+{
+  MOZ_ASSERT(CycleCollectedJSContext::Get(), "Must be on a script thread!");
+  return CycleCollectedJSContext::Get()->IsInStableOrMetaStableState();
 }
 
 /*
@@ -6382,9 +6467,7 @@ nsContentUtils::IsFocusedContent(const nsIContent* aContent)
 bool
 nsContentUtils::IsSubDocumentTabbable(nsIContent* aContent)
 {
-  //XXXsmaug Shadow DOM spec issue!
-  //         We may need to change this to GetComposedDoc().
-  nsIDocument* doc = aContent->GetUncomposedDoc();
+  nsIDocument* doc = aContent->GetComposedDoc();
   if (!doc) {
     return false;
   }
@@ -6417,9 +6500,16 @@ nsContentUtils::IsSubDocumentTabbable(nsIContent* aContent)
   contentViewer->GetPreviousViewer(getter_AddRefs(zombieViewer));
 
   // If there are 2 viewers for the current docshell, that
-  // means the current document is a zombie document.
-  // Only navigate into the subdocument if it's not a zombie.
-  return !zombieViewer;
+  // means the current document may be a zombie document.
+  // While load and pageshow events are dispatched, zombie viewer is the old,
+  // to be hidden document.
+  if (zombieViewer) {
+    bool inOnLoad = false;
+    docShell->GetIsExecutingOnLoadHandler(&inOnLoad);
+    return inOnLoad;
+  }
+
+  return true;
 }
 
 bool
@@ -6890,7 +6980,7 @@ nsContentUtils::HaveEqualPrincipals(nsIDocument* aDoc1, nsIDocument* aDoc2)
 bool
 nsContentUtils::HasPluginWithUncontrolledEventDispatch(nsIContent* aContent)
 {
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || !defined(MOZ_ENABLE_NPAPI)
   // We control dispatch to all mac plugins.
   return false;
 #else
@@ -8533,6 +8623,7 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType)
   case nsIContentPolicy::TYPE_INTERNAL_WORKER:
   case nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER:
   case nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER:
+  case nsIContentPolicy::TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS:
     return nsIContentPolicy::TYPE_SCRIPT;
 
   case nsIContentPolicy::TYPE_INTERNAL_EMBED:
@@ -8680,6 +8771,25 @@ nsContentUtils::PushEnabled(JSContext* aCx, JSObject* aObj)
   }
 
   return workerPrivate->PushEnabled();
+}
+
+// static
+bool
+nsContentUtils::StreamsEnabled(JSContext* aCx, JSObject* aObj)
+{
+  if (NS_IsMainThread()) {
+    return Preferences::GetBool("dom.streams.enabled", false);
+  }
+
+  using namespace workers;
+
+  // Otherwise, check the pref via the WorkerPrivate
+  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+  if (!workerPrivate) {
+    return false;
+  }
+
+  return workerPrivate->StreamsEnabled();
 }
 
 // static
@@ -9940,4 +10050,141 @@ nsContentUtils::GetClosestNonNativeAnonymousAncestor(Element* aElement)
     e = e->GetParentElement();
   }
   return e;
+}
+
+/* static */ nsresult
+nsContentUtils::CreateJSValueFromSequenceOfObject(JSContext* aCx,
+                                                  const Sequence<JSObject*>& aTransfer,
+                                                  JS::MutableHandle<JS::Value> aValue)
+{
+  if (aTransfer.IsEmpty()) {
+    return NS_OK;
+  }
+
+  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, aTransfer.Length()));
+  if (!array) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  for (uint32_t i = 0; i < aTransfer.Length(); ++i) {
+    JS::Rooted<JSObject*> object(aCx, aTransfer[i]);
+    if (!object) {
+      continue;
+    }
+
+    if (NS_WARN_IF(!JS_DefineElement(aCx, array, i, object,
+                                     JSPROP_ENUMERATE))) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+  }
+
+  aValue.setObject(*array);
+  return NS_OK;
+}
+
+/* static */
+void nsContentUtils::StructuredClone(JSContext* aCx,
+                                     nsIGlobalObject* aGlobal,
+                                     JS::Handle<JS::Value> aValue,
+                                     const StructuredSerializeOptions& aOptions,
+                                     JS::MutableHandle<JS::Value> aRv,
+                                     ErrorResult& aError) {
+  JS::Rooted<JS::Value> transferArray(aCx, JS::UndefinedValue());
+  aError = nsContentUtils::CreateJSValueFromSequenceOfObject(
+      aCx, aOptions.mTransfer, &transferArray);
+  if (NS_WARN_IF(aError.Failed())) {
+    return;
+  }
+
+  JS::CloneDataPolicy clonePolicy;
+  // FIXME: Uncomment once bug 1609990 and bug 1611855 lands.
+  //clonePolicy.allowIntraClusterClonableSharedObjects();
+  //clonePolicy.allowSharedMemoryObjects();
+
+  StructuredCloneHolder holder(StructuredCloneHolder::CloningSupported,
+                               StructuredCloneHolder::TransferringSupported,
+                               JS::StructuredCloneScope::SameProcessDifferentThread);
+  holder.Write(aCx, aValue, transferArray, clonePolicy, aError);
+  if (NS_WARN_IF(aError.Failed())) {
+    return;
+  }
+
+  // TODO: Pass clonePolicy.
+  //holder.Read(this, aCx, aRv, clonePolicy, aError);
+  holder.Read(aGlobal, aCx, aRv, aError);
+  if (NS_WARN_IF(aError.Failed())) {
+    return;
+  }
+
+  nsTArray<RefPtr<MessagePort>> ports = holder.TakeTransferredPorts();
+  Unused << ports;
+}
+
+/* static */ void
+nsContentUtils::ExtractErrorValues(JSContext* aCx,
+                                   JS::Handle<JS::Value> aValue,
+                                   nsACString& aSourceSpecOut,
+                                   uint32_t* aLineOut,
+                                   uint32_t* aColumnOut,
+                                   nsString& aMessageOut)
+{
+  MOZ_ASSERT(aLineOut);
+  MOZ_ASSERT(aColumnOut);
+
+  if (aValue.isObject()) {
+    JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
+    RefPtr<dom::DOMException> domException;
+
+    // Try to process as an Error object.  Use the file/line/column values
+    // from the Error as they will be more specific to the root cause of
+    // the problem.
+    JSErrorReport* err = obj ? JS_ErrorFromException(aCx, obj) : nullptr;
+    if (err) {
+      // Use xpc to extract the error message only.  We don't actually send
+      // this report anywhere.
+      RefPtr<xpc::ErrorReport> report = new xpc::ErrorReport();
+      report->Init(err,
+                   "<unknown>", // toString result
+                   false,       // chrome
+                   0);          // window ID
+
+      if (!report->mFileName.IsEmpty()) {
+        CopyUTF16toUTF8(report->mFileName, aSourceSpecOut);
+        *aLineOut = report->mLineNumber;
+        *aColumnOut = report->mColumn;
+      }
+      aMessageOut.Assign(report->mErrorMsg);
+    }
+
+    // Next, try to unwrap the rejection value as a DOMException.
+    else if(NS_SUCCEEDED(UNWRAP_OBJECT(DOMException, obj, domException))) {
+
+      nsAutoString filename;
+      domException->GetFilename(aCx, filename);
+      if (!filename.IsEmpty()) {
+        CopyUTF16toUTF8(filename, aSourceSpecOut);
+        *aLineOut = domException->LineNumber(aCx);
+        *aColumnOut = domException->ColumnNumber();
+      }
+
+      domException->GetName(aMessageOut);
+      aMessageOut.AppendLiteral(": ");
+
+      nsAutoString message;
+      domException->GetMessageMoz(message);
+      aMessageOut.Append(message);
+    }
+  }
+
+  // If we could not unwrap a specific error type, then perform default safe
+  // string conversions on primitives.  Objects will result in "[Object]"
+  // unfortunately.
+  if (aMessageOut.IsEmpty()) {
+    nsAutoJSString jsString;
+    if (jsString.init(aCx, aValue)) {
+      aMessageOut = jsString;
+    } else {
+      JS_ClearPendingException(aCx);
+    }
+  }
 }

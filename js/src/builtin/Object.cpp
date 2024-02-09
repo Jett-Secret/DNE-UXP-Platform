@@ -7,6 +7,8 @@
 
 #include "mozilla/ArrayUtils.h"
 
+#include "builtin/BigInt.h"
+
 #include "jscntxt.h"
 #include "jsstr.h"
 
@@ -15,6 +17,7 @@
 #include "jit/InlinableNatives.h"
 #include "js/UniquePtr.h"
 #include "vm/AsyncFunction.h"
+#include "vm/EqualityOperations.h"  // js::SameValue
 #include "vm/StringBuffer.h"
 
 #include "jsobjinlines.h"
@@ -470,6 +473,9 @@ js::obj_toString(JSContext* cx, unsigned argc, Value* vp)
           case ESClass::RegExp:
             builtinTag = cx->names().objectRegExp;
             break;
+          case ESClass::BigInt:
+            builtinTag = cx->names().objectBigInt;
+            break;
           default:
             if (obj->isCallable()) {
                 // Non-standard: Prevent <object> from showing up as Function.
@@ -836,7 +842,9 @@ EnumerableOwnProperties(JSContext* cx, const JS::CallArgs& args, EnumerableOwnPr
         if (obj->is<NativeObject>()) {
             HandleNativeObject nobj = obj.as<NativeObject>();
             if (JSID_IS_INT(id) && nobj->containsDenseElement(JSID_TO_INT(id))) {
-                value = nobj->getDenseOrTypedArrayElement(JSID_TO_INT(id));
+                if(!nobj->getDenseOrTypedArrayElement<CanGC>(cx, JSID_TO_INT(id), &value)) {
+                    return false;
+                }
             } else {
                 shape = nobj->lookup(cx, id);
                 if (!shape || !(shape->attributes() & JSPROP_ENUMERATE))
@@ -1239,6 +1247,7 @@ static const JSFunctionSpec object_static_methods[] = {
     JS_FN("seal",                      obj_seal,                    1, 0),
     JS_FN("isSealed",                  obj_isSealed,                1, 0),
     JS_SELF_HOSTED_FN("fromEntries",   "ObjectFromEntries",         1, 0),
+    JS_SELF_HOSTED_FN("hasOwn",        "ObjectHasOwn",              2, 0),
     JS_FS_END
 };
 

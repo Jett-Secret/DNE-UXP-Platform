@@ -233,12 +233,10 @@ LIRGeneratorX64::visitWasmStore(MWasmStore* ins)
         break;
       case Scalar::Float32:
       case Scalar::Float64:
-      case Scalar::Float32x4:
-      case Scalar::Int8x16:
-      case Scalar::Int16x8:
-      case Scalar::Int32x4:
         valueAlloc = useRegisterAtStart(value);
         break;
+      case Scalar::BigInt64:
+      case Scalar::BigUint64:
       case Scalar::Uint8Clamped:
       case Scalar::MaxTypedArrayViewType:
         MOZ_CRASH("unexpected array type");
@@ -277,10 +275,6 @@ LIRGeneratorX64::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
         break;
       case Scalar::Float32:
       case Scalar::Float64:
-      case Scalar::Float32x4:
-      case Scalar::Int8x16:
-      case Scalar::Int16x8:
-      case Scalar::Int32x4:
         lir = new(alloc()) LAsmJSStoreHeap(useRegisterOrZeroAtStart(base),
                                            useRegisterAtStart(ins->value()));
         break;
@@ -492,3 +486,10 @@ LIRGeneratorX64::visitExtendInt32ToInt64(MExtendInt32ToInt64* ins)
 {
     defineInt64(new(alloc()) LExtendInt32ToInt64(useAtStart(ins->input())), ins);
 }
+
+void
+LIRGeneratorX64::visitSignExtendInt64(MSignExtendInt64* ins)
+{
+    defineInt64(new(alloc()) LSignExtendInt64(useInt64RegisterAtStart(ins->input())), ins);
+}
+

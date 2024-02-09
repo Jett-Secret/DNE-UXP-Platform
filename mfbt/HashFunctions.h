@@ -51,6 +51,7 @@
 #include "mozilla/Char16.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Types.h"
+#include "mozilla/WrappingOperations.h"
 
 #include <stdint.h>
 
@@ -95,7 +96,9 @@ AddU32ToHash(uint32_t aHash, uint32_t aValue)
    * Otherwise, if |aHash| is 0 (as it often is for the beginning of a
    * message), the expression
    *
-   *   (kGoldenRatioU32 * RotateBitsLeft(aHash, 5)) |xor| aValue
+   *   mozilla::WrappingMultiply(kGoldenRatioU32, RotateBitsLeft(aHash, 5))
+   *   |xor|
+   *   aValue
    *
    * evaluates to |aValue|.
    *
@@ -113,7 +116,8 @@ AddU32ToHash(uint32_t aHash, uint32_t aValue)
    * multiplicative effect.  Our golden ratio constant has order 2^29, which is
    * more than enough for our purposes.)
    */
-  return kGoldenRatioU32 * (RotateBitsLeft32(aHash, 5) ^ aValue);
+  return mozilla::WrappingMultiply(kGoldenRatioU32,
+                                   (RotateBitsLeft32(aHash, 5) ^ aValue));
 }
 
 /**
@@ -156,7 +160,7 @@ AddUintptrToHash<8>(uint32_t aHash, uintptr_t aValue)
  * convert to uint32_t, data pointers, and function pointers.
  */
 template<typename A>
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 AddToHash(uint32_t aHash, A aA)
 {
   /*
@@ -167,7 +171,7 @@ AddToHash(uint32_t aHash, A aA)
 }
 
 template<typename A>
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 AddToHash(uint32_t aHash, A* aA)
 {
   /*
@@ -181,14 +185,14 @@ AddToHash(uint32_t aHash, A* aA)
 }
 
 template<>
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 AddToHash(uint32_t aHash, uintptr_t aA)
 {
   return detail::AddUintptrToHash<sizeof(uintptr_t)>(aHash, aA);
 }
 
 template<typename A, typename... Args>
-MOZ_MUST_USE uint32_t
+[[nodiscard]] uint32_t
 AddToHash(uint32_t aHash, A aArg, Args... aArgs)
 {
   return AddToHash(AddToHash(aHash, aArg), aArgs...);
@@ -202,7 +206,7 @@ AddToHash(uint32_t aHash, A aArg, Args... aArgs)
  * that x has already been hashed.
  */
 template<typename... Args>
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 HashGeneric(Args... aArgs)
 {
   return AddToHash(0, aArgs...);
@@ -240,32 +244,32 @@ HashKnownLength(const T* aStr, size_t aLength)
  * If you have the string's length, you might as well call the overload which
  * includes the length.  It may be marginally faster.
  */
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 HashString(const char* aStr)
 {
   return detail::HashUntilZero(reinterpret_cast<const unsigned char*>(aStr));
 }
 
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 HashString(const char* aStr, size_t aLength)
 {
   return detail::HashKnownLength(reinterpret_cast<const unsigned char*>(aStr), aLength);
 }
 
-MOZ_MUST_USE
+[[nodiscard]]
 inline uint32_t
 HashString(const unsigned char* aStr, size_t aLength)
 {
   return detail::HashKnownLength(aStr, aLength);
 }
 
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 HashString(const char16_t* aStr)
 {
   return detail::HashUntilZero(aStr);
 }
 
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 HashString(const char16_t* aStr, size_t aLength)
 {
   return detail::HashKnownLength(aStr, aLength);
@@ -276,13 +280,13 @@ HashString(const char16_t* aStr, size_t aLength)
  * the same width!
  */
 #ifdef WIN32
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 HashString(const wchar_t* aStr)
 {
   return detail::HashUntilZero(aStr);
 }
 
-MOZ_MUST_USE inline uint32_t
+[[nodiscard]] inline uint32_t
 HashString(const wchar_t* aStr, size_t aLength)
 {
   return detail::HashKnownLength(aStr, aLength);
@@ -295,7 +299,7 @@ HashString(const wchar_t* aStr, size_t aLength)
  * This hash walks word-by-word, rather than byte-by-byte, so you won't get the
  * same result out of HashBytes as you would out of HashString.
  */
-MOZ_MUST_USE extern MFBT_API uint32_t
+[[nodiscard]] extern MFBT_API uint32_t
 HashBytes(const void* bytes, size_t aLength);
 
 /**

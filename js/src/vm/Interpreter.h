@@ -305,16 +305,6 @@ class InvokeState final : public RunState
 extern bool
 RunScript(JSContext* cx, RunState& state);
 
-extern bool
-StrictlyEqual(JSContext* cx, HandleValue lval, HandleValue rval, bool* equal);
-
-extern bool
-LooselyEqual(JSContext* cx, HandleValue lval, HandleValue rval, bool* equal);
-
-/* === except that NaN is the same as NaN and -0 is not the same as +0. */
-extern bool
-SameValue(JSContext* cx, HandleValue v1, HandleValue v2, bool* same);
-
 extern JSType
 TypeOfObject(JSObject* obj);
 
@@ -467,6 +457,9 @@ bool
 ModValues(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
 
 bool
+PowValues(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
+
+bool
 UrshValues(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
 
 bool
@@ -488,6 +481,9 @@ ThrowMsgOperation(JSContext* cx, const unsigned errorNum);
 
 bool
 GetAndClearException(JSContext* cx, MutableHandleValue res);
+
+bool
+GetAndClearExceptionAndStack(JSContext* cx, MutableHandleValue res, MutableHandleSavedFrame stack);
 
 bool
 DeleteNameOperation(JSContext* cx, HandlePropertyName name, HandleObject scopeObj,

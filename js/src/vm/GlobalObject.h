@@ -25,9 +25,6 @@ class Debugger;
 class TypedObjectModuleObject;
 class LexicalEnvironmentObject;
 
-class SimdTypeDescr;
-enum class SimdType;
-
 /*
  * Global object slots are reserved as follows:
  *
@@ -82,6 +79,8 @@ class GlobalObject : public NativeObject
         FROM_BUFFER_INT16,
         FROM_BUFFER_UINT32,
         FROM_BUFFER_INT32,
+        FROM_BUFFER_UINT64,
+        FROM_BUFFER_INT64,
         FROM_BUFFER_FLOAT32,
         FROM_BUFFER_FLOAT64,
         FROM_BUFFER_UINT8CLAMPED,
@@ -107,10 +106,13 @@ class GlobalObject : public NativeObject
         MAP_ITERATOR_PROTO,
         SET_ITERATOR_PROTO,
         COLLATOR_PROTO,
+        NUMBER_FORMAT,
         NUMBER_FORMAT_PROTO,
+        DATE_TIME_FORMAT,
         DATE_TIME_FORMAT_PROTO,
         PLURAL_RULES_PROTO,
         RELATIVE_TIME_FORMAT_PROTO,
+        LOCALE_PROTO,
         MODULE_PROTO,
         IMPORT_ENTRY_PROTO,
         EXPORT_ENTRY_PROTO,
@@ -477,17 +479,6 @@ class GlobalObject : public NativeObject
                                  initTypedObjectModule);
     }
 
-    static JSObject*
-    getOrCreateSimdGlobalObject(JSContext* cx, Handle<GlobalObject*> global) {
-        return getOrCreateObject(cx, global, APPLICATION_SLOTS + JSProto_SIMD, initSimdObject);
-    }
-
-    // Get the type descriptor for one of the SIMD types.
-    // simdType is one of the JS_SIMDTYPEREPR_* constants.
-    // Implemented in builtin/SIMD.cpp.
-    static SimdTypeDescr*
-    getOrCreateSimdTypeDescr(JSContext* cx, Handle<GlobalObject*> global, SimdType simdType);
-
     TypedObjectModuleObject& getTypedObjectModule() const;
 
     JSObject* getLegacyIteratorPrototype() {
@@ -500,8 +491,25 @@ class GlobalObject : public NativeObject
     }
 
     static JSObject*
+    getOrCreateLocalePrototype(JSContext* cx, Handle<GlobalObject*> global) {
+        return getOrCreateObject(cx, global, LOCALE_PROTO, initIntlObject);
+    }
+
+    static JSFunction*
+    getOrCreateNumberFormatConstructor(JSContext* cx, Handle<GlobalObject*> global) {
+        JSObject* obj = getOrCreateObject(cx, global, NUMBER_FORMAT, initIntlObject);
+        return obj ? &obj->as<JSFunction>() : nullptr;
+    }
+
+    static JSObject*
     getOrCreateNumberFormatPrototype(JSContext* cx, Handle<GlobalObject*> global) {
         return getOrCreateObject(cx, global, NUMBER_FORMAT_PROTO, initIntlObject);
+    }
+
+    static JSFunction*
+    getOrCreateDateTimeFormatConstructor(JSContext* cx, Handle<GlobalObject*> global) {
+        JSObject* obj = getOrCreateObject(cx, global, DATE_TIME_FORMAT, initIntlObject);
+        return obj ? &obj->as<JSFunction>() : nullptr;
     }
 
     static JSObject*
@@ -795,7 +803,8 @@ class GlobalObject : public NativeObject
     template<typename T>
     inline Value createArrayFromBuffer() const;
 
-    static bool isRuntimeCodeGenEnabled(JSContext* cx, Handle<GlobalObject*> global);
+    static bool isRuntimeCodeGenEnabled(JSContext* cx, HandleValue code,
+                                        Handle<GlobalObject*> global);
 
     // Warn about use of the deprecated watch/unwatch functions in the global
     // in which |obj| was created, if no prior warning was given.
@@ -846,10 +855,6 @@ class GlobalObject : public NativeObject
 
     // Implemented in builtin/TypedObject.cpp
     static bool initTypedObjectModule(JSContext* cx, Handle<GlobalObject*> global);
-
-    // Implemented in builtin/SIMD.cpp
-    static bool initSimdObject(JSContext* cx, Handle<GlobalObject*> global);
-    static bool initSimdType(JSContext* cx, Handle<GlobalObject*> global, SimdType simdType);
 
     static bool initStandardClasses(JSContext* cx, Handle<GlobalObject*> global);
     static bool initSelfHostingBuiltins(JSContext* cx, Handle<GlobalObject*> global,
@@ -939,6 +944,20 @@ GlobalObject::setCreateArrayFromBuffer<int32_t>(Handle<JSFunction*> fun)
 
 template<>
 inline void
+GlobalObject::setCreateArrayFromBuffer<uint64_t>(Handle<JSFunction*> fun)
+{
+    setCreateArrayFromBufferHelper(FROM_BUFFER_UINT64, fun);
+}
+
+template<>
+inline void
+GlobalObject::setCreateArrayFromBuffer<int64_t>(Handle<JSFunction*> fun)
+{
+    setCreateArrayFromBufferHelper(FROM_BUFFER_INT64, fun);
+}
+
+template<>
+inline void
 GlobalObject::setCreateArrayFromBuffer<float>(Handle<JSFunction*> fun)
 {
     setCreateArrayFromBufferHelper(FROM_BUFFER_FLOAT32, fun);
@@ -998,6 +1017,20 @@ inline Value
 GlobalObject::createArrayFromBuffer<int32_t>() const
 {
     return createArrayFromBufferHelper(FROM_BUFFER_INT32);
+}
+
+template<>
+inline Value
+GlobalObject::createArrayFromBuffer<uint64_t>() const
+{
+    return createArrayFromBufferHelper(FROM_BUFFER_UINT64);
+}
+
+template<>
+inline Value
+GlobalObject::createArrayFromBuffer<int64_t>() const
+{
+    return createArrayFromBufferHelper(FROM_BUFFER_INT64);
 }
 
 template<>

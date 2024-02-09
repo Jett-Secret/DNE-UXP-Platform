@@ -294,7 +294,7 @@ ClassCanHaveFixedData(const Class* clasp)
 // returned in place of the pointer passed. If a GC occurs, the returned pointer
 // may be the passed pointer, relocated by GC. If no GC could occur, it's just
 // passed through. We root nothing unless necessary.
-static MOZ_ALWAYS_INLINE MOZ_MUST_USE JSObject*
+[[nodiscard]] static MOZ_ALWAYS_INLINE JSObject*
 SetNewObjectMetadata(ExclusiveContext* cxArg, JSObject* obj)
 {
     MOZ_ASSERT(!cxArg->compartment()->hasObjectPendingMetadata());
@@ -319,7 +319,7 @@ SetNewObjectMetadata(ExclusiveContext* cxArg, JSObject* obj)
 
 } // namespace js
 
-/* static */ inline JSObject*
+/* static */ inline JS::Result<JSObject*, JS::OOM&>
 JSObject::create(js::ExclusiveContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
                  js::HandleShape shape, js::HandleObjectGroup group)
 {
@@ -375,7 +375,7 @@ JSObject::create(js::ExclusiveContext* cx, js::gc::AllocKind kind, js::gc::Initi
 
     JSObject* obj = js::Allocate<JSObject>(cx, kind, nDynamicSlots, heap, clasp);
     if (!obj)
-        return nullptr;
+        return cx->alreadyReportedOOM();
 
     obj->group_.init(group);
 
@@ -564,6 +564,12 @@ IsNativeFunction(const js::Value& v, JSNative native)
 {
     JSFunction* fun;
     return IsFunctionObject(v, &fun) && fun->maybeNative() == native;
+}
+
+static MOZ_ALWAYS_INLINE bool
+IsNativeFunction(const JSObject* obj, JSNative native)
+{
+    return obj->is<JSFunction>() && obj->as<JSFunction>().maybeNative() == native;
 }
 
 // Return whether looking up a method on 'obj' definitely resolves to the

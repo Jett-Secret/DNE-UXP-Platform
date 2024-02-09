@@ -156,6 +156,12 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     startAsyncTaskCallback(nullptr),
     finishAsyncTaskCallback(nullptr),
     promiseTasksToDestroy(mutexid::PromiseTaskPtrVector),
+    readableStreamDataRequestCallback(nullptr),
+    readableStreamWriteIntoReadRequestCallback(nullptr),
+    readableStreamCancelCallback(nullptr),
+    readableStreamClosedCallback(nullptr),
+    readableStreamErroredCallback(nullptr),
+    readableStreamFinalizeCallback(nullptr),
     exclusiveAccessLock(mutexid::RuntimeExclusiveAccess),
 #ifdef DEBUG
     mainThreadHasExclusiveAccess(false),
@@ -243,7 +249,11 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     stackFormat_(parentRuntime ?
                  js::StackFormat::Default :
                  js::StackFormat::SpiderMonkey),
-    moduleResolveHook()
+    moduleResolveHook(),
+    moduleMetadataHook(),
+    moduleDynamicImportHook(),
+    scriptPrivateAddRefHook(),
+    scriptPrivateReleaseHook()
 {
     setGCStoreBufferPtr(&gc.storeBuffer);
 
@@ -548,7 +558,7 @@ InvokeInterruptCallback(JSContext* cx)
                     Debugger::propagateForcedReturn(cx, iter.abstractFramePtr(), rval);
                     return false;
                   case JSTRAP_THROW:
-                    cx->setPendingException(rval);
+                    cx->setPendingExceptionAndCaptureStack(rval);
                     return false;
                   default:;
                 }
@@ -721,8 +731,8 @@ JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job, HandleObject pro
     if (promise) {
         RootedObject unwrappedPromise(cx, promise);
         // While the job object is guaranteed to be unwrapped, the promise
-        // might be wrapped. See the comments in
-        // intrinsic_EnqueuePromiseReactionJob for details.
+        // might be wrapped. See the comments in EnqueuePromiseReactionJob in
+        // builtin/Promise.cpp for details.
         if (IsWrapper(promise))
             unwrappedPromise = UncheckedUnwrap(promise);
         if (unwrappedPromise->is<PromiseObject>())
@@ -874,6 +884,9 @@ js::CurrentThreadCanAccessRuntime(const JSRuntime* rt)
 bool
 js::CurrentThreadCanAccessZone(Zone* zone)
 {
+    if (!zone)
+        return false;
+
     if (CurrentThreadCanAccessRuntime(zone->runtime_))
         return true;
 

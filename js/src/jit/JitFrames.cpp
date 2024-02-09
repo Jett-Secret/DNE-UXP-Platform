@@ -888,7 +888,12 @@ HandleException(ResumeFromException* rfe)
                 ++frames;
             }
 
+            // Remove left-over state which might have been needed for bailout.
             activation->removeIonFrameRecovery(iter.jsFrame());
+            activation->removeRematerializedFrame(iter.fp());
+
+            // If invalidated, decrement the number of frames remaining on the
+            // stack for the given IonScript.
             if (invalidated)
                 ionScript->decrementInvalidationCount(cx->runtime()->defaultFreeOp());
 
@@ -1772,6 +1777,12 @@ FromSymbolPayload(uintptr_t payload)
 }
 
 static Value
+FromBigIntPayload(uintptr_t payload)
+{
+    return BigIntValue(reinterpret_cast<JS::BigInt*>(payload));
+}
+
+static Value
 FromTypedPayload(JSValueType type, uintptr_t payload)
 {
     switch (type) {
@@ -1783,6 +1794,8 @@ FromTypedPayload(JSValueType type, uintptr_t payload)
         return FromStringPayload(payload);
       case JSVAL_TYPE_SYMBOL:
         return FromSymbolPayload(payload);
+      case JSVAL_TYPE_BIGINT:
+        return FromBigIntPayload(payload);
       case JSVAL_TYPE_OBJECT:
         return FromObjectPayload(payload);
       default:
@@ -1882,6 +1895,8 @@ SnapshotIterator::allocationValue(const RValueAllocation& alloc, ReadMethod rm)
             return FromStringPayload(fromStack(alloc.stackOffset2()));
           case JSVAL_TYPE_SYMBOL:
             return FromSymbolPayload(fromStack(alloc.stackOffset2()));
+          case JSVAL_TYPE_BIGINT:
+            return FromBigIntPayload(fromStack(alloc.stackOffset2()));
           case JSVAL_TYPE_OBJECT:
             return FromObjectPayload(fromStack(alloc.stackOffset2()));
           default:

@@ -6,7 +6,7 @@
 #ifndef mozilla_dom_workers_workerprivate_h__
 #define mozilla_dom_workers_workerprivate_h__
 
-#include "Workers.h"
+#include "mozilla/dom/workers/Workers.h"
 
 #include "js/CharacterEncoding.h"
 #include "nsIContentPolicy.h"
@@ -17,6 +17,7 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/ConsoleReportCollector.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -33,8 +34,8 @@
 #include "nsThreadUtils.h"
 #include "nsTObserverArray.h"
 
-#include "Queue.h"
-#include "WorkerHolder.h"
+#include "mozilla/dom/workerinternals/Queue.h"
+#include "mozilla/dom/workers/bindings/WorkerHolder.h"
 
 #ifdef XP_WIN
 #undef PostMessage
@@ -68,6 +69,7 @@ class PromiseNativeHandler;
 class StructuredCloneHolder;
 class WorkerDebuggerGlobalScope;
 class WorkerGlobalScope;
+struct StructuredSerializeOptions;
 } // namespace dom
 namespace ipc {
 class PrincipalInfo;
@@ -211,6 +213,9 @@ protected:
   RefPtr<EventTarget> mEventTarget;
   nsTArray<RefPtr<WorkerRunnable>> mPreStartRunnables;
 
+  // True if the worker is used in the UI
+  bool mIsChromeWorker;
+
 private:
   WorkerPrivate* mParent;
   nsString mScriptURL;
@@ -240,7 +245,6 @@ private:
   uint32_t mParentWindowPausedDepth;
   Status mParentStatus;
   bool mParentFrozen;
-  bool mIsChromeWorker;
   bool mMainThreadObjectsForgotten;
   // mIsSecureContext is set once in our constructor; after that it can be read
   // from various threads.  We could make this const if we were OK with setting
@@ -287,7 +291,7 @@ private:
 
   void
   PostMessageInternal(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-                      const Optional<Sequence<JS::Value>>& aTransferable,
+                      const Sequence<JSObject*>& aTransferable,
                       UniquePtr<ServiceWorkerClientInfo>&& aClientInfo,
                       PromiseNativeHandler* aHandler,
                       ErrorResult& aRv);
@@ -400,12 +404,18 @@ public:
 
   void
   PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-              const Optional<Sequence<JS::Value>>& aTransferable,
+              const Sequence<JSObject*>& aTransferable,
+              ErrorResult& aRv);
+
+  void
+  PostMessage(JSContext* aCx,
+              JS::Handle<JS::Value> aMessage,
+              const StructuredSerializeOptions& aOptions,
               ErrorResult& aRv);
 
   void
   PostMessageToServiceWorker(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-                             const Optional<Sequence<JS::Value>>& aTransferable,
+                             const Sequence<JSObject*>& aTransferable,
                              UniquePtr<ServiceWorkerClientInfo>&& aClientInfo,
                              PromiseNativeHandler* aHandler,
                              ErrorResult& aRv);
@@ -523,6 +533,13 @@ public:
   ServiceWorkerID() const
   {
     return mLoadInfo.mServiceWorkerID;
+  }
+
+  const nsCString&
+  ServiceWorkerScope() const
+  {
+    MOZ_DIAGNOSTIC_ASSERT(IsServiceWorker());
+    return mWorkerName;
   }
 
   nsIURI*
@@ -646,8 +663,8 @@ public:
       return mLoadInfo.mPrincipal;
   }
 
-  void
-  SetPrincipal(nsIPrincipal* aPrincipal, nsILoadGroup* aLoadGroup);
+  nsresult
+  SetPrincipalOnMainThread(nsIPrincipal* aPrincipal, nsILoadGroup* aLoadGroup);
 
   bool
   UsesSystemPrincipal() const
@@ -690,6 +707,10 @@ public:
     AssertIsOnMainThread();
     mLoadInfo.mCSP = aCSP;
   }
+
+  nsresult
+  SetCSPFromHeaderValues(const nsACString& aCSPHeaderValue,
+                         const nsACString& aCSPReportOnlyHeaderValue);
 
   net::ReferrerPolicy
   GetReferrerPolicy() const
@@ -817,7 +838,7 @@ public:
   const nsCString&
   WorkerName() const
   {
-    MOZ_ASSERT(IsServiceWorker() || IsSharedWorker());
+    MOZ_ASSERT(IsSharedWorker());
     return mWorkerName;
   }
 
@@ -970,6 +991,7 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   RefPtr<WorkerDebuggerGlobalScope> mDebuggerScope;
   nsTArray<ParentType*> mChildWorkers;
   nsTObserverArray<WorkerHolder*> mHolders;
+  uint32_t mNumHoldersPreventingShutdownStart;
   nsTArray<nsAutoPtr<TimeoutInfo>> mTimeouts;
   uint32_t mDebuggerEventLoopLevel;
   RefPtr<ThrottledEventQueue> mMainThreadThrottledEventQueue;
@@ -1009,6 +1031,20 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   uint32_t mErrorHandlerRecursionCount;
   uint32_t mNextTimeoutId;
   Status mStatus;
+
+  // Tracks the current setTimeout/setInterval nesting level.
+  // When there isn't a TimeoutHandler on the stack, this will be 0.
+  // Whenever setTimeout/setInterval are called, a new TimeoutInfo will be
+  // created with a nesting level one more than the current nesting level,
+  // saturating at the kClampTimeoutNestingLevel.
+  //
+  // When RunExpiredTimeouts is run, it sets this value to the
+  // TimeoutInfo::mNestingLevel for the duration of
+  // the WorkerScriptTimeoutHandler::Call which will explicitly trigger a
+  // microtask checkpoint so that any immediately-resolved promises will
+  // still see the nesting level.
+  uint32_t mCurrentTimerNestingLevel;
+
   bool mFrozen;
   bool mTimerRunning;
   bool mRunningExpiredTimeouts;
@@ -1161,18 +1197,17 @@ public:
   void
   PostMessageToParent(JSContext* aCx,
                       JS::Handle<JS::Value> aMessage,
-                      const Optional<Sequence<JS::Value>>& aTransferable,
+                      const Sequence<JSObject*>& aTransferable,
                       ErrorResult& aRv)
   {
     PostMessageToParentInternal(aCx, aMessage, aTransferable, aRv);
   }
 
   void
-  PostMessageToParentMessagePort(
-                             JSContext* aCx,
-                             JS::Handle<JS::Value> aMessage,
-                             const Optional<Sequence<JS::Value>>& aTransferable,
-                             ErrorResult& aRv);
+  PostMessageToParentMessagePort(JSContext* aCx,
+                                 JS::Handle<JS::Value> aMessage,
+                                 const Sequence<JSObject*>& aTransferable,
+                                 ErrorResult& aRv);
 
   void
   EnterDebuggerEventLoop();
@@ -1199,6 +1234,9 @@ public:
 
   static void
   ReportErrorToConsole(const char* aMessage);
+
+  static void
+  ReportErrorToConsole(const char* aMessage, const nsTArray<nsString>& aParams);
 
   int32_t
   SetTimeout(JSContext* aCx, nsIScriptTimeoutHandler* aHandler,
@@ -1471,7 +1509,7 @@ private:
   void
   PostMessageToParentInternal(JSContext* aCx,
                               JS::Handle<JS::Value> aMessage,
-                              const Optional<Sequence<JS::Value>>& aTransferable,
+                              const Sequence<JSObject*>& aTransferable,
                               ErrorResult& aRv);
 
   void

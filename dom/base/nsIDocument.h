@@ -1811,26 +1811,6 @@ public:
                                    nsIAtom* aAttrName,
                                    const nsAString& aAttrValue) const = 0;
 
-  /**
-   * Helper for nsIDOMDocument::elementFromPoint implementation that allows
-   * ignoring the scroll frame and/or avoiding layout flushes.
-   *
-   * @see nsIDOMWindowUtils::elementFromPoint
-   */
-  virtual Element* ElementFromPointHelper(float aX, float aY,
-                                          bool aIgnoreRootScrollFrame,
-                                          bool aFlushLayout) = 0;
-
-  enum ElementsFromPointFlags {
-    IGNORE_ROOT_SCROLL_FRAME = 1,
-    FLUSH_LAYOUT = 2,
-    IS_ELEMENT_FROM_POINT = 4
-  };
-
-  virtual void ElementsFromPointHelper(float aX, float aY,
-                                       uint32_t aFlags,
-                                       nsTArray<RefPtr<mozilla::dom::Element>>& aElements) = 0;
-
   virtual nsresult NodesFromRectHelper(float aX, float aY,
                                        float aTopSize, float aRightSize,
                                        float aBottomSize, float aLeftSize,
@@ -2403,8 +2383,9 @@ public:
 
   virtual nsresult AddPlugin(nsIObjectLoadingContent* aPlugin) = 0;
   virtual void RemovePlugin(nsIObjectLoadingContent* aPlugin) = 0;
+#ifdef MOZ_ENABLE_NPAPI
   virtual void GetPlugins(nsTArray<nsIObjectLoadingContent*>& aPlugins) = 0;
-
+#endif
   virtual nsresult AddResponsiveContent(nsIContent* aContent) = 0;
   virtual void RemoveResponsiveContent(nsIContent* aContent) = 0;
   virtual void NotifyMediaFeatureValuesChanged() = 0;
@@ -2533,8 +2514,8 @@ public:
                 mozilla::ErrorResult& rv);
   virtual mozilla::dom::DOMImplementation*
     GetImplementation(mozilla::ErrorResult& rv) = 0;
-  MOZ_MUST_USE nsresult GetURL(nsString& retval) const;
-  MOZ_MUST_USE nsresult GetDocumentURI(nsString& retval) const;
+  [[nodiscard]] nsresult GetURL(nsString& retval) const;
+  [[nodiscard]] nsresult GetDocumentURI(nsString& retval) const;
   // Return the URI for the document.
   // The returned value may differ if the document is loaded via XHR, and
   // when accessed from chrome privileged script and
@@ -2619,6 +2600,11 @@ public:
   virtual void SetTitle(const nsAString& aTitle, mozilla::ErrorResult& rv) = 0;
   void GetDir(nsAString& aDirection) const;
   void SetDir(const nsAString& aDirection);
+  already_AddRefed<nsContentList> GetElementsByName(const nsAString & aName)
+  {
+    return NS_GetFuncStringNodeList(this, MatchNameAttribute, nullptr,
+                                    UseExistingNameString, aName);
+  }
   nsPIDOMWindowOuter* GetDefaultView() const
   {
     return GetWindow();
@@ -2637,17 +2623,17 @@ public:
   nsIURI* GetDocumentURIObject() const;
   // Not const because all the full-screen goop is not const
   virtual bool FullscreenEnabled() = 0;
-  virtual Element* GetFullscreenElement() = 0;
+  virtual Element* FullScreenStackTop() = 0;
   bool Fullscreen()
   {
     return !!GetFullscreenElement();
   }
   void ExitFullscreen();
-  Element* GetPointerLockElement();
   void ExitPointerLock()
   {
     UnlockPointer(this);
   }
+  static bool IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject);
 #ifdef MOZILLA_INTERNAL_API
   bool Hidden() const
   {
@@ -2664,10 +2650,6 @@ public:
   void GetPreferredStyleSheetSet(nsAString& aSheetSet);
   virtual mozilla::dom::DOMStringList* StyleSheetSets() = 0;
   virtual void EnableStyleSheetsForSet(const nsAString& aSheetSet) = 0;
-  Element* ElementFromPoint(float aX, float aY);
-  void ElementsFromPoint(float aX,
-                         float aY,
-                         nsTArray<RefPtr<mozilla::dom::Element>>& aElements);
 
   /**
    * Retrieve the location of the caret position (DOM node and character
@@ -2835,6 +2817,16 @@ public:
 
   bool ModuleScriptsEnabled();
 
+  /**
+   * Find the (non-anonymous) content in this document for aFrame. It will
+   * be aFrame's content node if that content is in this document and not
+   * anonymous. Otherwise, when aFrame is in a subdocument, we use the frame
+   * element containing the subdocument containing aFrame, and/or find the
+   * nearest non-anonymous ancestor in this document.
+   * Returns null if there is no such element.
+   */
+  nsIContent* GetContentInThisDocument(nsIFrame* aFrame) const;
+
   virtual void AddResizeObserver(mozilla::dom::ResizeObserver* aResizeObserver) = 0;
 
   virtual void ScheduleResizeObserversNotification() const = 0;
@@ -2896,6 +2888,12 @@ protected:
   // mPresShell is becoming null; in that case it will be used to get hold of
   // the relevant refresh driver.
   void UpdateFrameRequestCallbackSchedulingState(nsIPresShell* aOldShell = nullptr);
+
+  // Helpers for GetElementsByName.
+  static bool MatchNameAttribute(mozilla::dom::Element* aElement,
+                                 int32_t aNamespaceID,
+                                 nsIAtom* aAtom, void* aData);
+  static void* UseExistingNameString(nsINode* aRootNode, const nsString* aName);
 
   nsCString mReferrer;
   nsString mLastModified;

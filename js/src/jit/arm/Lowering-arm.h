@@ -63,17 +63,6 @@ class LIRGeneratorARM : public LIRGeneratorShared
     void lowerForFPU(LInstructionHelper<1, 2, Temps>* ins, MDefinition* mir,
                      MDefinition* lhs, MDefinition* rhs);
 
-    void lowerForCompIx4(LSimdBinaryCompIx4* ins, MSimdBinaryComp* mir,
-                         MDefinition* lhs, MDefinition* rhs)
-    {
-        return lowerForFPU(ins, mir, lhs, rhs);
-    }
-    void lowerForCompFx4(LSimdBinaryCompFx4* ins, MSimdBinaryComp* mir,
-                         MDefinition* lhs, MDefinition* rhs)
-    {
-        return lowerForFPU(ins, mir, lhs, rhs);
-    }
-
     void lowerForBitAndAndBranch(LBitAndAndBranch* baab, MInstruction* mir,
                                  MDefinition* lhs, MDefinition* rhs);
     void lowerTruncateDToInt32(MTruncateToInt32* ins);
@@ -121,6 +110,7 @@ class LIRGeneratorARM : public LIRGeneratorShared
     void visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins);
     void visitCopySign(MCopySign* ins);
     void visitExtendInt32ToInt64(MExtendInt32ToInt64* ins);
+    void visitSignExtendInt64(MSignExtendInt64* ins);
 };
 
 typedef LIRGeneratorARM LIRGeneratorSpecific;

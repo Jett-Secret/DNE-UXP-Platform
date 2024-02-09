@@ -72,11 +72,15 @@ Int32ToString(ExclusiveContext* cx, int32_t i);
 extern JSAtom*
 Int32ToAtom(ExclusiveContext* cx, int32_t si);
 
+// ES6 15.7.3.12
+extern bool
+IsInteger(const Value& val);
+
 /*
  * Convert an integer or double (contained in the given value) to a string and
  * append to the given buffer.
  */
-extern MOZ_MUST_USE bool JS_FASTCALL
+[[nodiscard]] extern bool JS_FASTCALL
 NumberValueToStringBuffer(JSContext* cx, const Value& v, StringBuffer& sb);
 
 /* Same as js_NumberToString, different signature. */
@@ -155,7 +159,7 @@ enum class PrefixIntegerSeparatorHandling : bool {
  * then upon return *dp == 0 and *endp == start.
  */
 template <typename CharT>
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 GetPrefixInteger(ExclusiveContext* cx, const CharT* start, const CharT* end, int base,
                  PrefixIntegerSeparatorHandling separatorHandling, const CharT** endp,
                  double* dp);
@@ -165,7 +169,7 @@ GetPrefixInteger(ExclusiveContext* cx, const CharT* start, const CharT* end, int
  * '_', and doesn't have an |endp| outparam.  It should only be used when the
  * characters are known to only contain digits and '_'.
  */
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 GetDecimalInteger(ExclusiveContext* cx, const char16_t* start, const char16_t* end, double* dp);
 
 /*
@@ -173,14 +177,14 @@ GetDecimalInteger(ExclusiveContext* cx, const char16_t* start, const char16_t* e
  * should only be used when the characters are known to only contain digits,
  * '.', 'e' or 'E', '+' or '-', and '_'.
  */
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 GetDecimalNonInteger(ExclusiveContext* cx, const char16_t* start, const char16_t* end, double* dp);
 
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 StringToNumber(ExclusiveContext* cx, JSString* str, double* result);
 
 /* ES5 9.3 ToNumber, overwriting *vp with the appropriate number value. */
-MOZ_ALWAYS_INLINE MOZ_MUST_USE bool
+[[nodiscard]] MOZ_ALWAYS_INLINE bool
 ToNumber(JSContext* cx, JS::MutableHandleValue vp)
 {
     if (vp.isNumber())
@@ -194,7 +198,7 @@ ToNumber(JSContext* cx, JS::MutableHandleValue vp)
     return true;
 }
 
-MOZ_MUST_USE bool
+[[nodiscard]] bool
 num_parseInt(JSContext* cx, unsigned argc, Value* vp);
 
 }  /* namespace js */
@@ -212,16 +216,16 @@ num_parseInt(JSContext* cx, unsigned argc, Value* vp);
  * Return false if out of memory.
  */
 template <typename CharT>
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 js_strtod(js::ExclusiveContext* cx, const CharT* begin, const CharT* end,
           const CharT** dEnd, double* d);
 
 namespace js {
 
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 num_toString(JSContext* cx, unsigned argc, Value* vp);
 
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 num_valueOf(JSContext* cx, unsigned argc, Value* vp);
 
 static MOZ_ALWAYS_INLINE bool
@@ -261,7 +265,7 @@ IsDefinitelyIndex(const Value& v, uint32_t* indexp)
 }
 
 /* ES5 9.4 ToInteger. */
-static MOZ_MUST_USE inline bool
+[[nodiscard]] static inline bool
 ToInteger(JSContext* cx, HandleValue v, double* dp)
 {
     if (v.isInt32()) {
@@ -286,7 +290,7 @@ ToInteger(JSContext* cx, HandleValue v, double* dp)
  * For JSContext and ExclusiveContext.
  */
 template<typename T>
-MOZ_MUST_USE bool ToLengthClamped(T* cx, HandleValue v, uint32_t* out, bool* overflow);
+[[nodiscard]] bool ToLengthClamped(T* cx, HandleValue v, uint32_t* out, bool* overflow);
 
 /* Convert and range check an index value as for DataView, SIMD, and Atomics
  * operations, eg ES7 24.2.1.1, DataView's GetViewValue():
@@ -306,9 +310,18 @@ MOZ_MUST_USE bool ToLengthClamped(T* cx, HandleValue v, uint32_t* out, bool* ove
  *
  * The returned index will always be in the range 0 <= *index <= 2^53.
  */
-MOZ_MUST_USE bool ToIntegerIndex(JSContext* cx, JS::HandleValue v, uint64_t* index);
+[[nodiscard]] bool ToIntegerIndex(JSContext* cx, JS::HandleValue v, uint64_t* index);
 
-MOZ_MUST_USE inline bool
+/* ES2017 draft 7.1.17 ToIndex
+ *
+ * Return true and set |*index| to the integer value if |v| is a valid
+ * integer index value. Otherwise report a RangeError and return false.
+ *
+ * The returned index will always be in the range 0 <= *index <= 2^53-1.
+ */
+[[nodiscard]] bool ToIndex(JSContext* cx, JS::HandleValue v, uint64_t* index);
+
+[[nodiscard]] inline bool
 SafeAdd(int32_t one, int32_t two, int32_t* res)
 {
 #if BUILTIN_CHECKED_ARITHMETIC_SUPPORTED(__builtin_sadd_overflow)
@@ -323,7 +336,7 @@ SafeAdd(int32_t one, int32_t two, int32_t* res)
 #endif
 }
 
-MOZ_MUST_USE inline bool
+[[nodiscard]] inline bool
 SafeSub(int32_t one, int32_t two, int32_t* res)
 {
 #if BUILTIN_CHECKED_ARITHMETIC_SUPPORTED(__builtin_ssub_overflow)
@@ -335,7 +348,7 @@ SafeSub(int32_t one, int32_t two, int32_t* res)
 #endif
 }
 
-MOZ_MUST_USE inline bool
+[[nodiscard]] inline bool
 SafeMul(int32_t one, int32_t two, int32_t* res)
 {
 #if BUILTIN_CHECKED_ARITHMETIC_SUPPORTED(__builtin_smul_overflow)
@@ -347,12 +360,12 @@ SafeMul(int32_t one, int32_t two, int32_t* res)
 #endif
 }
 
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 ToNumberSlow(ExclusiveContext* cx, HandleValue v, double* dp);
 
 // Variant of ToNumber which takes an ExclusiveContext instead of a JSContext.
 // ToNumber is part of the API and can't use ExclusiveContext directly.
-MOZ_ALWAYS_INLINE MOZ_MUST_USE bool
+[[nodiscard]] MOZ_ALWAYS_INLINE bool
 ToNumber(ExclusiveContext* cx, HandleValue v, double* out)
 {
     if (v.isNumber()) {
@@ -360,6 +373,31 @@ ToNumber(ExclusiveContext* cx, HandleValue v, double* out)
         return true;
     }
     return ToNumberSlow(cx, v, out);
+}
+
+bool
+ToNumericSlow(ExclusiveContext* cx, JS::MutableHandleValue vp);
+
+// BigInt proposal section 3.1.6
+[[nodiscard]] MOZ_ALWAYS_INLINE bool
+ToNumeric(ExclusiveContext* cx, JS::MutableHandleValue vp)
+{
+    if (vp.isNumeric()) {
+        return true;
+    }
+    return ToNumericSlow(cx, vp);
+}
+
+bool
+ToInt32OrBigIntSlow(JSContext* cx, JS::MutableHandleValue vp);
+
+[[nodiscard]] MOZ_ALWAYS_INLINE bool
+ToInt32OrBigInt(JSContext* cx, JS::MutableHandleValue vp)
+{
+    if (vp.isInt32()) {
+        return true;
+    }
+    return ToInt32OrBigIntSlow(cx, vp);
 }
 
 void FIX_FPU();

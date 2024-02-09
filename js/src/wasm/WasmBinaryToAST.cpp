@@ -1,6 +1,7 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
  *
  * Copyright 2016 Mozilla Foundation
+ * Copyright 2023 Moonchild Productions
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -150,7 +151,7 @@ class AstDecodeContext
     void popBack() { return exprs().popBack(); }
     AstDecodeStackItem popCopy() { return exprs().popCopy(); }
     AstDecodeStackItem& top() { return exprs().back(); }
-    MOZ_MUST_USE bool push(AstDecodeStackItem item) { return exprs().append(item); }
+    [[nodiscard]] bool push(AstDecodeStackItem item) { return exprs().append(item); }
 
     bool needFirst() {
         for (size_t i = depths().back(); i < exprs().length(); ++i) {
@@ -1298,6 +1299,17 @@ AstDecodeExpr(AstDecodeContext& c)
         break;
       case uint16_t(Op::F64PromoteF32):
         if (!AstDecodeConversion(c, ValType::F32, ValType::F64, Op(op)))
+            return false;
+        break;
+      case uint16_t(Op::I32Extend8S):
+      case uint16_t(Op::I32Extend16S):
+        if (!AstDecodeConversion(c, ValType::I32, ValType::I32, Op(op)))
+            return false;
+        break;
+      case uint16_t(Op::I64Extend8S):
+      case uint16_t(Op::I64Extend16S):
+      case uint16_t(Op::I64Extend32S):
+        if (!AstDecodeConversion(c, ValType::I64, ValType::I64, Op(op)))
             return false;
         break;
       case uint16_t(Op::I32Load8S):

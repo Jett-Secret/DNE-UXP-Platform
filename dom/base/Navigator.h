@@ -7,6 +7,7 @@
 #define mozilla_dom_Navigator_h
 
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/Nullable.h"
 #include "mozilla/ErrorResult.h"
 #include "nsIDOMNavigator.h"
@@ -17,11 +18,10 @@
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsWeakPtr.h"
-#ifdef MOZ_EME
-#include "mozilla/dom/MediaKeySystemAccessManager.h"
-#endif
 
+#ifdef MOZ_ENABLE_NPAPI
 class nsPluginArray;
+#endif
 class nsMimeTypeArray;
 class nsPIDOMWindowInner;
 class nsIDOMNavigatorSystemMessages;
@@ -30,14 +30,16 @@ class nsIURI;
 
 namespace mozilla {
 namespace dom {
+class BodyExtractorBase;
 class Geolocation;
 class systemMessageCallback;
 class MediaDevices;
 struct MediaStreamConstraints;
 class WakeLock;
-class ArrayBufferViewOrBlobOrStringOrFormData;
+class ArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams;
 class ServiceWorkerContainer;
 class DOMRequest;
+class Clipboard;
 } // namespace dom
 } // namespace mozilla
 
@@ -127,7 +129,9 @@ public:
   void RegisterContentHandler(const nsAString& aMIMEType, const nsAString& aURL,
                               const nsAString& aTitle, ErrorResult& aRv);
   nsMimeTypeArray* GetMimeTypes(ErrorResult& aRv);
+#ifdef MOZ_ENABLE_NPAPI
   nsPluginArray* GetPlugins(ErrorResult& aRv);
+#endif
   Permissions* GetPermissions(ErrorResult& aRv);
   bool GlobalPrivacyControl();
   Geolocation* GetGeolocation(ErrorResult& aRv);
@@ -196,7 +200,7 @@ public:
 #endif // MOZ_AUDIO_CHANNEL_MANAGER
 
   bool SendBeacon(const nsAString& aUrl,
-                  const Nullable<ArrayBufferViewOrBlobOrStringOrFormData>& aData,
+                  const Nullable<fetch::BodyInit>& aData,
                   ErrorResult& aRv);
 
   void MozGetUserMedia(const MediaStreamConstraints& aConstraints,
@@ -211,6 +215,8 @@ public:
                               ErrorResult& aRv);
 
   already_AddRefed<ServiceWorkerContainer> ServiceWorker();
+  
+  dom::Clipboard* Clipboard();
 
   void GetLanguages(nsTArray<nsString>& aLanguages);
 
@@ -238,28 +244,35 @@ public:
   // any, else null.
   static already_AddRefed<nsPIDOMWindowInner> GetWindowFromGlobal(JSObject* aGlobal);
 
-#ifdef MOZ_EME
-  already_AddRefed<Promise>
-  RequestMediaKeySystemAccess(const nsAString& aKeySystem,
-                              const Sequence<MediaKeySystemConfiguration>& aConfig,
-                              ErrorResult& aRv);
-private:
-  RefPtr<MediaKeySystemAccessManager> mMediaKeySystemAccessManager;
-#endif
-
 private:
   virtual ~Navigator();
 
   bool CheckPermission(const char* type);
   static bool CheckPermission(nsPIDOMWindowInner* aWindow, const char* aType);
 
+  // This enum helps SendBeaconInternal to apply different behaviors to body
+  // types.
+  enum BeaconType {
+    eBeaconTypeBlob,
+    eBeaconTypeArrayBuffer,
+    eBeaconTypeOther
+  };
+
+  bool SendBeaconInternal(const nsAString& aUrl,
+                          BodyExtractorBase* aBody,
+                          BeaconType aType,
+                          ErrorResult& aRv);
+
   RefPtr<nsMimeTypeArray> mMimeTypes;
+#ifdef MOZ_ENABLE_NPAPI
   RefPtr<nsPluginArray> mPlugins;
+#endif
   RefPtr<Permissions> mPermissions;
   RefPtr<Geolocation> mGeolocation;
   RefPtr<DesktopNotificationCenter> mNotification;
   RefPtr<PowerManager> mPowerManager;
   RefPtr<network::Connection> mConnection;
+  RefPtr<dom::Clipboard> mClipboard;
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   RefPtr<system::AudioChannelManager> mAudioChannelManager;
 #endif

@@ -1,6 +1,4 @@
 /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim:expandtab:shiftwidth=4:tabstop=4:
- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -49,7 +47,7 @@
 #include <gdk/gdkkeysyms-compat.h>
 #endif
 
-#if (MOZ_WIDGET_GTK == 2)
+#if (MOZ_WIDGET_GTK == 2) && defined(MOZ_ENABLE_NPAPI)
 #include "gtk2xtbin.h"
 #endif
 #endif /* MOZ_X11 */
@@ -81,7 +79,9 @@
 #include "nsIPropertyBag2.h"
 #include "GLContext.h"
 #include "gfx2DGlue.h"
+#ifdef MOZ_ENABLE_NPAPI
 #include "nsPluginNativeWindowGtk.h"
+#endif
 
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/Accessible.h"
@@ -441,7 +441,9 @@ nsWindow::nsWindow()
     mContainer           = nullptr;
     mGdkWindow           = nullptr;
     mShell               = nullptr;
+#ifdef MOZ_ENABLE_NPAPI
     mPluginNativeWindow  = nullptr;
+#endif
     mHasMappedToplevel   = false;
     mIsFullyObscured     = false;
     mRetryPointerGrab    = false;
@@ -458,7 +460,9 @@ nsWindow::nsWindow()
     mXVisual  = nullptr;
     mXDepth   = 0;
 #endif /* MOZ_X11 */
+#ifdef MOZ_ENABLE_NPAPI
     mPluginType          = PluginType_NONE;
+#endif
 
     if (!gGlobalsInitialized) {
         gGlobalsInitialized = true;
@@ -1134,7 +1138,9 @@ nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     NativeResize();
 
     NotifyRollupGeometryChange();
+#ifdef MOZ_ENABLE_NPAPI
     ResizePluginSocketWidget();
+#endif
 
     // send a resize notification if this is a toplevel
     if (mIsTopLevel || mListenForResizes) {
@@ -1165,7 +1171,9 @@ nsWindow::Resize(double aX, double aY, double aWidth, double aHeight,
     NativeMoveResize();
 
     NotifyRollupGeometryChange();
+#ifdef MOZ_ENABLE_NPAPI
     ResizePluginSocketWidget();
+#endif
 
     if (mIsTopLevel || mListenForResizes) {
         DispatchResized();
@@ -1174,6 +1182,7 @@ nsWindow::Resize(double aX, double aY, double aWidth, double aHeight,
     return NS_OK;
 }
 
+#ifdef MOZ_ENABLE_NPAPI
 void
 nsWindow::ResizePluginSocketWidget()
 {
@@ -1190,6 +1199,7 @@ nsWindow::ResizePluginSocketWidget()
         }
     }
 }
+#endif
 
 NS_IMETHODIMP
 nsWindow::Enable(bool aState)
@@ -1732,6 +1742,7 @@ nsWindow::GetNativeData(uint32_t aDataType)
     case NS_NATIVE_PLUGIN_PORT:
         return SetupPluginPort();
 
+#ifdef MOZ_ENABLE_NPAPI
     case NS_NATIVE_PLUGIN_ID:
         if (!mPluginNativeWindow) {
           NS_WARNING("no native plugin instance!");
@@ -1739,6 +1750,7 @@ nsWindow::GetNativeData(uint32_t aDataType)
         }
         // Return the socket widget XID
         return (void*)mPluginNativeWindow->window;
+#endif
 
     case NS_NATIVE_DISPLAY: {
 #ifdef MOZ_X11
@@ -1754,8 +1766,10 @@ nsWindow::GetNativeData(uint32_t aDataType)
 
     case NS_NATIVE_SHAREABLE_WINDOW:
         return (void *) GDK_WINDOW_XID(gdk_window_get_toplevel(mGdkWindow));
+#ifdef MOZ_ENABLE_NPAPI
     case NS_NATIVE_PLUGIN_OBJECT_PTR:
         return (void *) mPluginNativeWindow;
+#endif
     case NS_RAW_NATIVE_IME_CONTEXT: {
         void* pseudoIMEContext = GetPseudoIMEContext();
         if (pseudoIMEContext) {
@@ -1780,6 +1794,7 @@ nsWindow::GetNativeData(uint32_t aDataType)
     }
 }
 
+#ifdef MOZ_ENABLE_NPAPI
 void
 nsWindow::SetNativeData(uint32_t aDataType, uintptr_t aVal)
 {
@@ -1789,6 +1804,7 @@ nsWindow::SetNativeData(uint32_t aDataType, uintptr_t aVal)
     }
     mPluginNativeWindow = (nsPluginNativeWindowGtk*)aVal;
 }
+#endif
 
 NS_IMETHODIMP
 nsWindow::SetTitle(const nsAString& aTitle)
@@ -4825,6 +4841,7 @@ nsWindow::SetDefaultIcon(void)
     SetIcon(NS_LITERAL_STRING("default"));
 }
 
+#ifdef MOZ_ENABLE_NPAPI
 void
 nsWindow::SetPluginType(PluginType aPluginType)
 {
@@ -4939,6 +4956,7 @@ nsWindow::LoseNonXEmbedPluginFocus()
     LOGFOCUS(("nsWindow::LoseNonXEmbedPluginFocus end\n"));
 }
 #endif /* MOZ_X11 */
+#endif /* MOZ_ENABLE_NPAPI */
 
 gint
 nsWindow::ConvertBorderStyles(nsBorderStyle aStyle)
@@ -5840,6 +5858,7 @@ popup_take_focus_filter(GdkXEvent *gdk_xevent,
     return GDK_FILTER_REMOVE;
 }
 
+
 static GdkFilterReturn
 plugin_window_filter_func(GdkXEvent *gdk_xevent, GdkEvent *event, gpointer data)
 {
@@ -5865,6 +5884,7 @@ plugin_window_filter_func(GdkXEvent *gdk_xevent, GdkEvent *event, gpointer data)
                     break;
                 xeventWindow = xevent->xreparent.window;
             }
+#ifdef MOZ_ENABLE_NPAPI
 #if (MOZ_WIDGET_GTK == 2)
             plugin_window = gdk_window_lookup(xeventWindow);
 #else
@@ -5905,12 +5925,14 @@ plugin_window_filter_func(GdkXEvent *gdk_xevent, GdkEvent *event, gpointer data)
             // LoseNonXEmbedPluginFocus without any checking.
             nswindow->LoseNonXEmbedPluginFocus();
             break;
+#endif // MOZ_ENABLE_NPAPI
         default:
             break;
     }
     return return_val;
 }
 
+#ifdef MOZ_ENABLE_NPAPI
 static GdkFilterReturn
 plugin_client_message_filter(GdkXEvent *gdk_xevent,
                              GdkEvent *event,
@@ -5944,6 +5966,7 @@ plugin_client_message_filter(GdkXEvent *gdk_xevent,
     return return_val;
 }
 #endif /* MOZ_X11 */
+#endif /* MOZ_ENABLE_NPAPI */
 
 static gboolean
 key_press_event_cb(GtkWidget *widget, GdkEventKey *event)

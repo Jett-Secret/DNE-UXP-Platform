@@ -45,7 +45,7 @@ class LIRGenerator : public LIRGeneratorSpecific
         maxargslots_(0)
     { }
 
-    MOZ_MUST_USE bool generate();
+    [[nodiscard]] bool generate();
 
   private:
     LBoxAllocation useBoxFixedAtStart(MDefinition* mir, Register reg1, Register reg2) {
@@ -60,11 +60,11 @@ class LIRGenerator : public LIRGeneratorSpecific
     void lowerBinaryV(JSOp op, MBinaryInstruction* ins);
     void definePhis();
 
-    MOZ_MUST_USE bool lowerCallArguments(MCall* call);
+    [[nodiscard]] bool lowerCallArguments(MCall* call);
 
   public:
-    MOZ_MUST_USE bool visitInstruction(MInstruction* ins);
-    MOZ_MUST_USE bool visitBlock(MBasicBlock* block);
+    [[nodiscard]] bool visitInstruction(MInstruction* ins);
+    [[nodiscard]] bool visitBlock(MBasicBlock* block);
 
     // Visitor hooks are explicit, to give CPU-specific versions a chance to
     // intercept without a bunch of explicit gunk in the .cpp.
@@ -130,7 +130,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitLsh(MLsh* ins);
     void visitRsh(MRsh* ins);
     void visitUrsh(MUrsh* ins);
-    void visitSignExtend(MSignExtend* ins);
+    void visitSignExtendInt32(MSignExtendInt32* ins);
     void visitRotate(MRotate* ins);
     void visitFloor(MFloor* ins);
     void visitCeil(MCeil* ins);
@@ -304,17 +304,6 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitGetDOMProperty(MGetDOMProperty* ins);
     void visitGetDOMMember(MGetDOMMember* ins);
     void visitRecompileCheck(MRecompileCheck* ins);
-    void visitSimdBox(MSimdBox* ins);
-    void visitSimdUnbox(MSimdUnbox* ins);
-    void visitSimdUnaryArith(MSimdUnaryArith* ins);
-    void visitSimdBinaryComp(MSimdBinaryComp* ins);
-    void visitSimdBinaryBitwise(MSimdBinaryBitwise* ins);
-    void visitSimdShift(MSimdShift* ins);
-    void visitSimdConstant(MSimdConstant* ins);
-    void visitSimdConvert(MSimdConvert* ins);
-    void visitSimdReinterpretCast(MSimdReinterpretCast* ins);
-    void visitSimdAllTrue(MSimdAllTrue* ins);
-    void visitSimdAnyTrue(MSimdAnyTrue* ins);
     void visitPhi(MPhi* ins);
     void visitBeta(MBeta* ins);
     void visitObjectState(MObjectState* ins);
@@ -334,6 +323,9 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitCheckIsCallable(MCheckIsCallable* ins);
     void visitCheckObjCoercible(MCheckObjCoercible* ins);
     void visitDebugCheckSelfHosted(MDebugCheckSelfHosted* ins);
+    void visitModuleMetadata(MModuleMetadata* ins);
+    void visitDynamicImport(MDynamicImport* ins);
+    void visitToNumeric(MToNumeric* ins);
 };
 
 } // namespace jit

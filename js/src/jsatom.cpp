@@ -28,6 +28,8 @@
 
 #include "vm/String-inl.h"
 
+#include "vm/BigIntType.h"
+
 using namespace js;
 using namespace js::gc;
 
@@ -44,7 +46,7 @@ js::AtomToPrintableString(ExclusiveContext* cx, JSAtom* atom, JSAutoByteString* 
     return bytes->encodeLatin1(cx, str);
 }
 
-#define DEFINE_PROTO_STRING(name,code,init,clasp) const char js_##name##_str[] = #name;
+#define DEFINE_PROTO_STRING(name,init,clasp) const char js_##name##_str[] = #name;
 JS_FOR_EACH_PROTOTYPE(DEFINE_PROTO_STRING)
 #undef DEFINE_PROTO_STRING
 
@@ -98,7 +100,7 @@ JSRuntime::initializeAtoms(JSContext* cx)
 #define COMMON_NAME_INFO(idpart, id, text) { js_##idpart##_str, sizeof(text) - 1 },
         FOR_EACH_COMMON_PROPERTYNAME(COMMON_NAME_INFO)
 #undef COMMON_NAME_INFO
-#define COMMON_NAME_INFO(name, code, init, clasp) { js_##name##_str, sizeof(#name) - 1 },
+#define COMMON_NAME_INFO(name, init, clasp) { js_##name##_str, sizeof(#name) - 1 },
         JS_FOR_EACH_PROTOTYPE(COMMON_NAME_INFO)
 #undef COMMON_NAME_INFO
 #define COMMON_NAME_INFO(name) { #name, sizeof(#name) - 1 },
@@ -484,6 +486,13 @@ ToAtomSlow(ExclusiveContext* cx, typename MaybeRooted<Value, allowGC>::HandleTyp
         }
         return nullptr;
     }
+    if (v.isBigInt()) {
+        RootedBigInt i(cx, v.toBigInt());
+        JSAtom* atom = BigIntToAtom(cx, i);
+        if (!allowGC && !atom)
+            cx->recoverFromOutOfMemory();
+        return atom;
+    }
     MOZ_ASSERT(v.isUndefined());
     return cx->names().undefined;
 }
@@ -538,7 +547,7 @@ js::XDRAtom(XDRState<mode>* xdr, MutableHandleAtom atomp)
     uint32_t length = lengthAndEncoding >> 1;
     bool latin1 = lengthAndEncoding & 0x1;
 
-    JSContext* cx = xdr->cx();
+    ExclusiveContext* cx = xdr->cx();
     JSAtom* atom;
     if (latin1) {
         const Latin1Char* chars = nullptr;
@@ -567,7 +576,7 @@ js::XDRAtom(XDRState<mode>* xdr, MutableHandleAtom atomp)
              * most allocations here will be bigger than tempLifoAlloc's default
              * chunk size.
              */
-            chars = cx->runtime()->pod_malloc<char16_t>(length);
+            chars = cx->pod_malloc<char16_t>(length);
             if (!chars)
                 return false;
         }

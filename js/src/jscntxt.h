@@ -12,6 +12,7 @@
 
 #include "js/CharacterEncoding.h"
 #include "js/GCVector.h"
+#include "js/Result.h"
 #include "js/Utility.h"
 #include "js/Vector.h"
 #include "vm/Caches.h"
@@ -314,6 +315,30 @@ class ExclusiveContext : public ContextFriendFields,
     bool addPendingCompileError(frontend::CompileError** err);
     void addPendingOverRecursed();
     void addPendingOutOfMemory();
+
+  private:
+    static JS::Error reportedError;
+    static JS::OOM reportedOOM;
+
+  public:
+    inline JS::Result<> boolToResult(bool ok);
+
+    /**
+     * Intentionally awkward signpost method that is stationed on the
+     * boundary between Result-using and non-Result-using code.
+     */
+    template <typename V, typename E>
+    bool resultToBool(JS::Result<V, E> result) {
+        return result.isOk();
+    }
+
+    template <typename V, typename E>
+    V* resultToPtr(JS::Result<V*, E> result) {
+        return result.isOk() ? result.unwrap() : nullptr;
+    }
+
+    mozilla::GenericErrorResult<JS::OOM&> alreadyReportedOOM();
+    mozilla::GenericErrorResult<JS::Error&> alreadyReportedError();
 };
 
 void ReportOverRecursed(JSContext* cx, unsigned errorNumber);
@@ -340,6 +365,7 @@ struct JSContext : public js::ExclusiveContext,
     using ExclusiveContext::permanentAtoms;
     using ExclusiveContext::pod_calloc;
     using ExclusiveContext::pod_malloc;
+    using ExclusiveContext::pod_realloc;
     using ExclusiveContext::staticStrings;
     using ExclusiveContext::updateMallocCounter;
     using ExclusiveContext::wellKnownSymbols;
@@ -369,6 +395,7 @@ struct JSContext : public js::ExclusiveContext,
     /* Exception state -- the exception member is a GC root by definition. */
     bool                throwing;            /* is there a pending exception? */
     JS::PersistentRooted<JS::Value> unwrappedException_; /* most-recently-thrown exception */
+    JS::PersistentRooted<js::SavedFrame*> unwrappedExceptionStack_; /* stack when the exception was thrown */
 
     // True if the exception currently being thrown is by result of
     // ReportOverRecursed. See Debugger::slowPathOnExceptionUnwind.
@@ -489,23 +516,27 @@ struct JSContext : public js::ExclusiveContext,
     }
 
   public:
-    bool isExceptionPending() {
+    bool isExceptionPending() const {
         return throwing;
     }
 
-    MOZ_MUST_USE
+    [[nodiscard]]
     bool getPendingException(JS::MutableHandleValue rval);
+    
+    js::SavedFrame* getPendingExceptionStack();
 
     bool isThrowingOutOfMemory();
     bool isThrowingDebuggeeWouldRun();
     bool isClosingGenerator();
 
-    void setPendingException(const js::Value& v);
+    void setPendingException(JS::HandleValue v, js::HandleSavedFrame stack);
+    void setPendingExceptionAndCaptureStack(JS::HandleValue v);
 
     void clearPendingException() {
         throwing = false;
         overRecursed_ = false;
         unwrappedException_.setUndefined();
+        unwrappedExceptionStack_ = nullptr;
     }
 
     bool isThrowingOverRecursed() const { return throwing && overRecursed_; }
@@ -534,6 +565,17 @@ struct JSContext : public js::ExclusiveContext,
 }; /* struct JSContext */
 
 namespace js {
+
+inline JS::Result<>
+ExclusiveContext::boolToResult(bool ok)
+{
+    if (MOZ_LIKELY(ok)) {
+        MOZ_ASSERT_IF(isJSContext(), !asJSContext()->isExceptionPending());
+        MOZ_ASSERT_IF(isJSContext(), !asJSContext()->isPropagatingForcedReturn());
+        return JS::Ok();
+    }
+    return JS::Result<>(reportedError);
+}
 
 struct MOZ_RAII AutoResolving {
   public:

@@ -25,7 +25,7 @@
 # include "wasm/WasmSignalHandlers.h"
 #endif
 #include "builtin/AtomicsObject.h"
-#include "builtin/Intl.h"
+#include "builtin/intl/SharedIntlData.h"
 #include "builtin/Promise.h"
 #include "ds/FixedSizeHash.h"
 #include "frontend/NameCollections.h"
@@ -86,6 +86,10 @@ namespace js {
 
 extern MOZ_COLD void
 ReportOutOfMemory(ExclusiveContext* cx);
+
+/* Different signature because the return type has MOZ_MUST_USE_TYPE. */
+extern MOZ_COLD mozilla::GenericErrorResult<OOM&>
+ReportOutOfMemoryResult(ExclusiveContext* cx);
 
 extern MOZ_COLD void
 ReportAllocationOverflow(ExclusiveContext* maybecx);
@@ -169,7 +173,7 @@ struct JSAtomState
 #define PROPERTYNAME_FIELD(idpart, id, text) js::ImmutablePropertyNamePtr id;
     FOR_EACH_COMMON_PROPERTYNAME(PROPERTYNAME_FIELD)
 #undef PROPERTYNAME_FIELD
-#define PROPERTYNAME_FIELD(name, code, init, clasp) js::ImmutablePropertyNamePtr name;
+#define PROPERTYNAME_FIELD(name, init, clasp) js::ImmutablePropertyNamePtr name;
     JS_FOR_EACH_PROTOTYPE(PROPERTYNAME_FIELD)
 #undef PROPERTYNAME_FIELD
 #define PROPERTYNAME_FIELD(name) js::ImmutablePropertyNamePtr name;
@@ -651,6 +655,13 @@ struct JSRuntime : public JS::shadow::Runtime,
     JS::FinishAsyncTaskCallback finishAsyncTaskCallback;
     js::ExclusiveData<js::PromiseTaskPtrVector> promiseTasksToDestroy;
 
+    JS::RequestReadableStreamDataCallback readableStreamDataRequestCallback;
+    JS::WriteIntoReadRequestBufferCallback readableStreamWriteIntoReadRequestCallback;
+    JS::CancelReadableStreamCallback readableStreamCancelCallback;
+    JS::ReadableStreamClosedCallback readableStreamClosedCallback;
+    JS::ReadableStreamErroredCallback readableStreamErroredCallback;
+    JS::ReadableStreamFinalizeCallback readableStreamFinalizeCallback;
+
   private:
     /*
      * Lock taken when using per-runtime or per-zone data that could otherwise
@@ -810,7 +821,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     const char* getDefaultLocale();
 
     /* Shared Intl data for this runtime. */
-    js::SharedIntlData sharedIntlData;
+    js::intl::SharedIntlData sharedIntlData;
 
     void traceSharedIntlData(JSTracer* trc);
 
@@ -1296,6 +1307,30 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     // The implementation-defined abstract operation HostResolveImportedModule.
     JS::ModuleResolveHook moduleResolveHook;
+
+    // A hook that implements the abstract operations
+    // HostGetImportMetaProperties and HostFinalizeImportMeta.
+    JS::ModuleMetadataHook moduleMetadataHook;
+
+    // A hook that implements the abstract operation
+    // HostImportModuleDynamically.
+    JS::ModuleDynamicImportHook moduleDynamicImportHook;
+
+    // Hooks called when script private references are created and destroyed.
+    JS::ScriptPrivateReferenceHook scriptPrivateAddRefHook;
+    JS::ScriptPrivateReferenceHook scriptPrivateReleaseHook;
+
+    void addRefScriptPrivate(const JS::Value& value) {
+      if (!value.isUndefined() && scriptPrivateAddRefHook) {
+        scriptPrivateAddRefHook(value);
+      }
+    }
+
+    void releaseScriptPrivate(const JS::Value& value) {
+      if (!value.isUndefined() && scriptPrivateReleaseHook) {
+        scriptPrivateReleaseHook(value);
+      }
+    }
 };
 
 namespace js {

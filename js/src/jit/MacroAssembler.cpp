@@ -45,12 +45,13 @@ MacroAssembler::guardTypeSet(const Source& address, const TypeSet* types, Barrie
     MOZ_ASSERT(!types->unknown());
 
     Label matched;
-    TypeSet::Type tests[8] = {
+    TypeSet::Type tests[9] = {
         TypeSet::Int32Type(),
         TypeSet::UndefinedType(),
         TypeSet::BooleanType(),
         TypeSet::StringType(),
         TypeSet::SymbolType(),
+        TypeSet::BigIntType(),
         TypeSet::NullType(),
         TypeSet::MagicArgType(),
         TypeSet::AnyObjectType()
@@ -239,8 +240,7 @@ template void MacroAssembler::guardTypeSetMightBeIncomplete(const TemporaryTypeS
 
 template<typename S, typename T>
 static void
-StoreToTypedFloatArray(MacroAssembler& masm, int arrayType, const S& value, const T& dest,
-                       unsigned numElems)
+StoreToTypedFloatArray(MacroAssembler& masm, int arrayType, const S& value, const T& dest)
 {
     switch (arrayType) {
       case Scalar::Float32:
@@ -249,48 +249,6 @@ StoreToTypedFloatArray(MacroAssembler& masm, int arrayType, const S& value, cons
       case Scalar::Float64:
         masm.storeDouble(value, dest);
         break;
-      case Scalar::Float32x4:
-        switch (numElems) {
-          case 1:
-            masm.storeFloat32(value, dest);
-            break;
-          case 2:
-            masm.storeDouble(value, dest);
-            break;
-          case 3:
-            masm.storeFloat32x3(value, dest);
-            break;
-          case 4:
-            masm.storeUnalignedSimd128Float(value, dest);
-            break;
-          default: MOZ_CRASH("unexpected number of elements in simd write");
-        }
-        break;
-      case Scalar::Int32x4:
-        switch (numElems) {
-          case 1:
-            masm.storeInt32x1(value, dest);
-            break;
-          case 2:
-            masm.storeInt32x2(value, dest);
-            break;
-          case 3:
-            masm.storeInt32x3(value, dest);
-            break;
-          case 4:
-            masm.storeUnalignedSimd128Int(value, dest);
-            break;
-          default: MOZ_CRASH("unexpected number of elements in simd write");
-        }
-        break;
-      case Scalar::Int8x16:
-        MOZ_ASSERT(numElems == 16, "unexpected partial store");
-        masm.storeUnalignedSimd128Int(value, dest);
-        break;
-      case Scalar::Int16x8:
-        MOZ_ASSERT(numElems == 8, "unexpected partial store");
-        masm.storeUnalignedSimd128Int(value, dest);
-        break;
       default:
         MOZ_CRASH("Invalid typed array type");
     }
@@ -298,21 +256,21 @@ StoreToTypedFloatArray(MacroAssembler& masm, int arrayType, const S& value, cons
 
 void
 MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value,
-                                       const BaseIndex& dest, unsigned numElems)
+                                       const BaseIndex& dest)
 {
-    StoreToTypedFloatArray(*this, arrayType, value, dest, numElems);
+    StoreToTypedFloatArray(*this, arrayType, value, dest);
 }
 void
 MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value,
-                                       const Address& dest, unsigned numElems)
+                                       const Address& dest)
 {
-    StoreToTypedFloatArray(*this, arrayType, value, dest, numElems);
+    StoreToTypedFloatArray(*this, arrayType, value, dest);
 }
 
 template<typename T>
 void
 MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src, AnyRegister dest, Register temp,
-                                   Label* fail, bool canonicalizeDoubles, unsigned numElems)
+                                   Label* fail, bool canonicalizeDoubles)
 {
     switch (arrayType) {
       case Scalar::Int8:
@@ -344,6 +302,11 @@ MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src, AnyRegi
             branchTest32(Assembler::Signed, dest.gpr(), dest.gpr(), fail);
         }
         break;
+      case Scalar::BigInt64:
+      case Scalar::BigUint64:
+        // FIXME: https://bugzil.la/1536702
+        jump(fail);
+        break;
       case Scalar::Float32:
         loadFloat32(src, dest.fpu());
         canonicalizeFloat(dest.fpu());
@@ -353,59 +316,15 @@ MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src, AnyRegi
         if (canonicalizeDoubles)
             canonicalizeDouble(dest.fpu());
         break;
-      case Scalar::Int32x4:
-        switch (numElems) {
-          case 1:
-            loadInt32x1(src, dest.fpu());
-            break;
-          case 2:
-            loadInt32x2(src, dest.fpu());
-            break;
-          case 3:
-            loadInt32x3(src, dest.fpu());
-            break;
-          case 4:
-            loadUnalignedSimd128Int(src, dest.fpu());
-            break;
-          default: MOZ_CRASH("unexpected number of elements in SIMD load");
-        }
-        break;
-      case Scalar::Float32x4:
-        switch (numElems) {
-          case 1:
-            loadFloat32(src, dest.fpu());
-            break;
-          case 2:
-            loadDouble(src, dest.fpu());
-            break;
-          case 3:
-            loadFloat32x3(src, dest.fpu());
-            break;
-          case 4:
-            loadUnalignedSimd128Float(src, dest.fpu());
-            break;
-          default: MOZ_CRASH("unexpected number of elements in SIMD load");
-        }
-        break;
-      case Scalar::Int8x16:
-        MOZ_ASSERT(numElems == 16, "unexpected partial load");
-        loadUnalignedSimd128Int(src, dest.fpu());
-        break;
-      case Scalar::Int16x8:
-        MOZ_ASSERT(numElems == 8, "unexpected partial load");
-        loadUnalignedSimd128Int(src, dest.fpu());
-        break;
       default:
         MOZ_CRASH("Invalid typed array type");
     }
 }
 
 template void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const Address& src, AnyRegister dest,
-                                                 Register temp, Label* fail, bool canonicalizeDoubles,
-                                                 unsigned numElems);
+                                                 Register temp, Label* fail, bool canonicalizeDoubles);
 template void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const BaseIndex& src, AnyRegister dest,
-                                                 Register temp, Label* fail, bool canonicalizeDoubles,
-                                                 unsigned numElems);
+                                                 Register temp, Label* fail, bool canonicalizeDoubles);
 
 template<typename T>
 void
@@ -446,17 +365,25 @@ MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src, const V
             tagValue(JSVAL_TYPE_INT32, temp, dest);
         }
         break;
-      case Scalar::Float32:
+      case Scalar::Float32: {
         loadFromTypedArray(arrayType, src, AnyRegister(ScratchFloat32Reg), dest.scratchReg(),
                            nullptr);
         convertFloat32ToDouble(ScratchFloat32Reg, ScratchDoubleReg);
         boxDouble(ScratchDoubleReg, dest);
         break;
-      case Scalar::Float64:
+      }
+      case Scalar::Float64: {
         loadFromTypedArray(arrayType, src, AnyRegister(ScratchDoubleReg), dest.scratchReg(),
                            nullptr);
         boxDouble(ScratchDoubleReg, dest);
         break;
+      }
+      // FIXME: https://bugzil.la/1536702
+      case Scalar::BigInt64:
+      case Scalar::BigUint64: {
+        jump(fail);
+        break;
+      }
       default:
         MOZ_CRASH("Invalid typed array type");
     }
@@ -478,7 +405,7 @@ MacroAssembler::loadUnboxedProperty(T address, JSValueType type, TypedOrValueReg
               convertInt32ToDouble(address, output.typedReg().fpu());
               break;
           }
-          MOZ_FALLTHROUGH;
+          [[fallthrough]];
       }
 
       case JSVAL_TYPE_BOOLEAN:
@@ -2735,6 +2662,9 @@ MacroAssembler::maybeBranchTestType(MIRType type, MDefinition* maybeDef, Registe
             break;
           case MIRType::Symbol:
             branchTestSymbol(Equal, tag, label);
+            break;
+          case MIRType::BigInt:
+            branchTestBigInt(Equal, tag, label);
             break;
           case MIRType::Object:
             branchTestObject(Equal, tag, label);

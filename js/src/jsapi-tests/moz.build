@@ -3,7 +3,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-include(../js-cxxflags.mozbuild)
+include('../js-cxxflags.mozbuild')
 
 GeckoProgram('jsapi-tests', linkage=None)
 
@@ -124,6 +124,11 @@ if CONFIG['ENABLE_ION']:
         'testJitRangeAnalysis.cpp',
         'testJitRegisterSet.cpp',
         'testJitRValueAlloc.cpp',
+    ]
+
+if CONFIG['ENABLE_STREAMS']:
+    UNIFIED_SOURCES += [
+        'testReadableStream.cpp',
     ]
 
 DEFINES['EXPORT_JS_API'] = True

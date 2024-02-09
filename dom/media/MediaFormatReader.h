@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -19,10 +18,6 @@
 #include "PDMFactory.h"
 
 namespace mozilla {
-
-#ifdef MOZ_EME
-class CDMProxy;
-#endif
 
 class MediaFormatReader final : public MediaDecoderReader
 {
@@ -93,10 +88,6 @@ public:
     return mTrackDemuxersMayBlock;
   }
 
-#ifdef MOZ_EME
-  void SetCDMProxy(CDMProxy* aProxy) override;
-#endif
-
   // Returns a string describing the state of the decoder data.
   // Used for debugging purposes.
   void GetMozDebugReaderData(nsAString& aString);
@@ -108,8 +99,6 @@ private:
 
   bool HasVideo() const { return mVideo.mTrackDemuxer; }
   bool HasAudio() const { return mAudio.mTrackDemuxer; }
-
-  bool IsWaitingOnCDMResource();
 
   bool InitDemuxer();
   // Notify the demuxer that new data has been received.
@@ -588,11 +577,9 @@ private:
   RefPtr<VideoFrameContainer> mVideoFrameContainer;
   layers::ImageContainer* GetImageContainer();
 
-#ifdef MOZ_EME
-  RefPtr<CDMProxy> mCDMProxy;
-#endif
-
+#ifdef MOZ_GMP
   RefPtr<GMPCrashHelper> mCrashHelper;
+#endif
 
   void SetBlankDecode(TrackType aTrack, bool aIsBlankDecode);
 

@@ -3416,6 +3416,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
   nsDisplayList list;
 
+#ifdef MOZ_ENABLE_NPAPI
   // If the root has embedded plugins, flag the builder so we know we'll need
   // to update plugin geometry after painting.
   if ((aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
@@ -3423,6 +3424,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       rootPresContext->NeedToComputePluginGeometryUpdates()) {
     builder.SetWillComputePluginGeometry(true);
   }
+#endif
 
   nsRect canvasArea(nsPoint(0, 0), aFrame->GetSize());
   bool ignoreViewportScrolling =
@@ -3684,6 +3686,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     }
   }
 
+#ifdef MOZ_ENABLE_NPAPI
   if (builder.WillComputePluginGeometry()) {
     // For single process compute and apply plugin geometry updates to plugin
     // windows, then request composition. For content processes skip eveything
@@ -3708,8 +3711,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       layerManager->Composite();
     }
   }
-
-
+#endif
   // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
   list.DeleteAll();
   return NS_OK;
@@ -7164,10 +7166,17 @@ nsLayoutUtils::SurfaceFromElement(nsIImageLoadingContent* aElement,
     imgWidth = element->Width();
     imgHeight = element->Height();
   } else {
+    // No size declared by the image element, so use the image size.
+    // As stated in css-sizing-3 Intrinsic Sizes, use the fallback size
+    // of 300 x 150 for unspecified width and height as-needed.
     rv = imgContainer->GetWidth(&imgWidth);
-    nsresult rv2 = imgContainer->GetHeight(&imgHeight);
-    if (NS_FAILED(rv) || NS_FAILED(rv2))
-      return result;
+    if (NS_FAILED(rv)) {
+      imgWidth = REPLACED_ELEM_FALLBACK_PX_WIDTH;
+    }
+    rv = imgContainer->GetHeight(&imgHeight);
+    if (NS_FAILED(rv)) {
+      imgHeight = REPLACED_ELEM_FALLBACK_PX_HEIGHT;
+    }
   }
   result.mSize = IntSize(imgWidth, imgHeight);
 
@@ -7270,12 +7279,6 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
   NS_WARNING_ASSERTION(
     (aSurfaceFlags & SFE_PREFER_NO_PREMULTIPLY_ALPHA) == 0,
     "We can't support non-premultiplied alpha for video!");
-
-#ifdef MOZ_EME
-  if (aElement->ContainsRestrictedContent()) {
-    return result;
-  }
-#endif
 
   uint16_t readyState;
   if (NS_SUCCEEDED(aElement->GetReadyState(&readyState)) &&

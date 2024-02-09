@@ -21,7 +21,9 @@
 #include "AppProcessChecker.h"
 #include "AudioChannelService.h"
 #include "BlobParent.h"
+#ifdef MOZ_GMP
 #include "GMPServiceParent.h"
+#endif
 #include "HandlerServiceParent.h"
 #include "IHistory.h"
 #include "imgIContainer.h"
@@ -73,7 +75,9 @@
 #include "mozilla/media/MediaParent.h"
 #include "mozilla/Move.h"
 #include "mozilla/net/NeckoParent.h"
+#ifdef MOZ_ENABLE_NPAPI
 #include "mozilla/plugins/PluginBridge.h"
+#endif
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
@@ -226,7 +230,9 @@ using namespace mozilla::dom::power;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gfx;
+#ifdef MOZ_GMP
 using namespace mozilla::gmp;
+#endif
 using namespace mozilla::hal;
 using namespace mozilla::ipc;
 using namespace mozilla::layers;
@@ -742,7 +748,7 @@ ContentParent::GetInitialProcessPriority(Element* aFrameElement)
   return PROCESS_PRIORITY_FOREGROUND;
 }
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) && defined(MOZ_ENABLE_NPAPI)
 extern const wchar_t* kPluginWidgetContentParentProperty;
 
 /*static*/ void
@@ -760,7 +766,10 @@ ContentParent::SendAsyncUpdate(nsIWidget* aWidget)
     Unused << cp->SendUpdateWindow((uintptr_t)hwnd);
   }
 }
-#endif // defined(XP_WIN)
+#elif defined(XP_WIN)
+/*static*/ void
+ContentParent::SendAsyncUpdate(nsIWidget* aWidget) {}
+#endif
 
 bool
 ContentParent::PreallocatedProcessReady()
@@ -862,17 +871,24 @@ static nsIDocShell* GetOpenerDocShellHelper(Element* aFrameElement)
   return docShell;
 }
 
+#ifdef MOZ_GMP
 bool
 ContentParent::RecvCreateGMPService()
 {
   return PGMPService::Open(this);
 }
+#endif
+
 
 bool
 ContentParent::RecvLoadPlugin(const uint32_t& aPluginId, nsresult* aRv, uint32_t* aRunID)
 {
+#ifdef MOZ_ENABLE_NPAPI
   *aRv = NS_OK;
   return mozilla::plugins::SetupBridge(aPluginId, this, false, aRv, aRunID);
+#else
+  return false;
+#endif
 }
 
 bool
@@ -895,6 +911,7 @@ ContentParent::RecvRemovePermission(const IPC::Principal& aPrincipal,
   return true;
 }
 
+#ifdef MOZ_ENABLE_NPAPI
 bool
 ContentParent::RecvConnectPluginBridge(const uint32_t& aPluginId, nsresult* aRv)
 {
@@ -905,14 +922,17 @@ ContentParent::RecvConnectPluginBridge(const uint32_t& aPluginId, nsresult* aRv)
   uint32_t dummy = 0;
   return mozilla::plugins::SetupBridge(aPluginId, this, true, aRv, &dummy);
 }
+#endif
 
 bool
 ContentParent::RecvGetBlocklistState(const uint32_t& aPluginId,
                                      uint32_t* aState)
 {
+#ifdef MOZ_ENABLE_NPAPI
   *aState = nsIBlocklistService::STATE_BLOCKED;
 
   RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
+  
   if (!pluginHost) {
     NS_WARNING("Plugin host not found");
     return false;
@@ -926,8 +946,12 @@ ContentParent::RecvGetBlocklistState(const uint32_t& aPluginId,
   }
 
   return NS_SUCCEEDED(tag->GetBlocklistState(aState));
+#else
+  return false;
+#endif
 }
 
+#ifdef MOZ_ENABLE_NPAPI
 bool
 ContentParent::RecvFindPlugins(const uint32_t& aPluginEpoch,
                                nsresult* aRv,
@@ -937,6 +961,7 @@ ContentParent::RecvFindPlugins(const uint32_t& aPluginEpoch,
   *aRv = mozilla::plugins::FindPluginsForContent(aPluginEpoch, aPlugins, aNewPluginEpoch);
   return true;
 }
+#endif
 
 /*static*/ TabParent*
 ContentParent::CreateBrowserOrApp(const TabContext& aContext,
@@ -1264,8 +1289,10 @@ ContentParent::Init()
   }
 #endif
 
+#ifdef MOZ_GMP
   RefPtr<GeckoMediaPluginServiceParent> gmps(GeckoMediaPluginServiceParent::GetSingleton());
   gmps->UpdateContentProcessGMPCapabilities();
+#endif
 }
 
 void
@@ -2534,12 +2561,14 @@ ContentParent::Observe(nsISupports* aSubject,
   return NS_OK;
 }
 
+#ifdef MOZ_GMP
 PGMPServiceParent*
 ContentParent::AllocPGMPServiceParent(mozilla::ipc::Transport* aTransport,
                                       base::ProcessId aOtherProcess)
 {
   return GMPServiceParent::Create(aTransport, aOtherProcess);
 }
+#endif
 
 PBackgroundParent*
 ContentParent::AllocPBackgroundParent(Transport* aTransport,

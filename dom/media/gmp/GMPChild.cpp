@@ -10,7 +10,6 @@
 #include "GMPVideoDecoderChild.h"
 #include "GMPVideoEncoderChild.h"
 #include "GMPAudioDecoderChild.h"
-#include "GMPDecryptorChild.h"
 #include "GMPVideoHost.h"
 #include "nsDebugImpl.h"
 #include "nsIFile.h"
@@ -22,9 +21,6 @@
 #include "GMPUtils.h"
 #include "prio.h"
 #include "base/task.h"
-#ifdef MOZ_EME
-#include "widevine-adapter/WidevineAdapter.h"
-#endif
 
 using namespace mozilla::ipc;
 
@@ -167,13 +163,12 @@ GMPChild::RecvSetNodeId(const nsCString& aNodeId)
 GMPErr
 GMPChild::GetAPI(const char* aAPIName,
                  void* aHostAPI,
-                 void** aPluginAPI,
-                 uint32_t aDecryptorId)
+                 void** aPluginAPI)
 {
   if (!mGMPLoader) {
     return GMPGenericErr;
   }
-  return mGMPLoader->GetAPI(aAPIName, aHostAPI, aPluginAPI, aDecryptorId);
+  return mGMPLoader->GetAPI(aAPIName, aHostAPI, aPluginAPI);
 }
 
 bool
@@ -256,13 +251,7 @@ GMPChild::AnswerStartPlugin(const nsString& aAdapter)
     return false;
   }
 
-#ifdef MOZ_EME
-  bool isWidevine = aAdapter.EqualsLiteral("widevine");
-
-  GMPAdapter* adapter = (isWidevine) ? new WidevineAdapter() : nullptr;
-#else
   GMPAdapter* adapter = nullptr;
-#endif
   if (!mGMPLoader->Load(libPath.get(),
                         libPath.Length(),
                         mNodeId.BeginWriting(),

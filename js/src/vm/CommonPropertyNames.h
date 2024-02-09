@@ -16,7 +16,10 @@
     macro(anonymous, anonymous, "anonymous") \
     macro(Any, Any, "Any") \
     macro(apply, apply, "apply") \
+    macro(args, args, "args") \
     macro(arguments, arguments, "arguments") \
+    macro(AcquireReadableStreamBYOBReader, AcquireReadableStreamBYOBReader, "AcquireReadableStreamBYOBReader") \
+    macro(AcquireReadableStreamDefaultReader, AcquireReadableStreamDefaultReader, "AcquireReadableStreamDefaultReader") \
     macro(ArrayBufferSpecies, ArrayBufferSpecies, "ArrayBufferSpecies") \
     macro(ArrayIterator, ArrayIterator, "Array Iterator") \
     macro(ArrayIteratorNext, ArrayIteratorNext, "ArrayIteratorNext") \
@@ -34,7 +37,10 @@
     macro(AsyncGeneratorFunction, AsyncGeneratorFunction, "AsyncGeneratorFunction") \
     macro(AsyncWrapped, AsyncWrapped, "AsyncWrapped") \
     macro(async, async, "async") \
+    macro(autoAllocateChunkSize, autoAllocateChunkSize, "autoAllocateChunkSize") \
     macro(await, await, "await") \
+    macro(bigint64, bigint64, "bigint64") \
+    macro(biguint64, biguint64, "biguint64") \
     macro(Bool8x16, Bool8x16, "Bool8x16") \
     macro(Bool16x8, Bool16x8, "Bool16x8") \
     macro(Bool32x4, Bool32x4, "Bool32x4") \
@@ -45,21 +51,25 @@
     macro(buffer, buffer, "buffer") \
     macro(builder, builder, "builder") \
     macro(by, by, "by") \
+    macro(byob, byob, "byob") \
     macro(byteAlignment, byteAlignment, "byteAlignment") \
     macro(byteLength, byteLength, "byteLength") \
     macro(byteOffset, byteOffset, "byteOffset") \
     macro(bytes, bytes, "bytes") \
     macro(BYTES_PER_ELEMENT, BYTES_PER_ELEMENT, "BYTES_PER_ELEMENT") \
+    macro(calendar, calendar, "calendar") \
     macro(call, call, "call") \
     macro(callContentFunction, callContentFunction, "callContentFunction") \
     macro(callee, callee, "callee") \
     macro(caller, caller, "caller") \
     macro(callFunction, callFunction, "callFunction") \
+    macro(cancel, cancel, "cancel") \
     macro(case, case_, "case") \
     macro(caseFirst, caseFirst, "caseFirst") \
     macro(catch, catch_, "catch") \
     macro(class, class_, "class") \
     macro(close, close, "close") \
+    macro(collation, collation, "collation") \
     macro(Collator, Collator, "Collator") \
     macro(CollatorCompareGet, CollatorCompareGet, "Intl_Collator_compare_get") \
     macro(collections, collections, "collections") \
@@ -102,6 +112,10 @@
     macro(dotAll, dotAll, "dotAll") \
     macro(dotGenerator, dotGenerator, ".generator") \
     macro(dotThis, dotThis, ".this") \
+    macro(dotInitializers, dotInitializers, ".initializers") \
+    macro(dotFieldKeys, dotFieldKeys, ".fieldKeys") \
+    macro(dotStaticInitializers, dotStaticInitializers, ".staticInitializers") \
+    macro(dotStaticFieldKeys, dotStaticFieldKeys, ".staticFieldKeys") \
     macro(each, each, "each") \
     macro(elementType, elementType, "elementType") \
     macro(else, else_, "else") \
@@ -116,6 +130,7 @@
     macro(enumerate, enumerate, "enumerate") \
     macro(era, era, "era") \
     macro(ErrorToStringWithTrailingNewline, ErrorToStringWithTrailingNewline, "ErrorToStringWithTrailingNewline") \
+    macro(errors, errors, "errors") \
     macro(escape, escape, "escape") \
     macro(eval, eval, "eval") \
     macro(exec, exec, "exec") \
@@ -129,6 +144,8 @@
     macro(finally, finally_, "finally") \
     macro(find, find, "find") \
     macro(findIndex, findIndex, "findIndex") \
+    macro(findLast, findLast, "findLast") \
+    macro(findLastIndex, findLastIndex, "findLastIndex") \
     macro(firstDayOfWeek, firstDayOfWeek, "firstDayOfWeek") \
     macro(fix, fix, "fix") \
     macro(flags, flags, "flags") \
@@ -154,6 +171,7 @@
     macro(GeneratorFunction, GeneratorFunction, "GeneratorFunction") \
     macro(get, get, "get") \
     macro(getInternals, getInternals, "getInternals") \
+    macro(GetModuleNamespace, GetModuleNamespace, "GetModuleNamespace") \
     macro(getOwnPropertyDescriptor, getOwnPropertyDescriptor, "getOwnPropertyDescriptor") \
     macro(getOwnPropertyNames, getOwnPropertyNames, "getOwnPropertyNames") \
     macro(getPrefix, getPrefix, "get ") \
@@ -167,7 +185,9 @@
     macro(has, has, "has") \
     macro(hasOwn, hasOwn, "hasOwn") \
     macro(hasOwnProperty, hasOwnProperty, "hasOwnProperty") \
+    macro(highWaterMark, highWaterMark, "highWaterMark") \
     macro(hour, hour, "hour") \
+    macro(hourCycle, hourCycle, "hourCycle") \
     macro(if, if_, "if") \
     macro(ignoreCase, ignoreCase, "ignoreCase") \
     macro(ignorePunctuation, ignorePunctuation, "ignorePunctuation") \
@@ -181,6 +201,7 @@
     macro(Infinity, Infinity, "Infinity") \
     macro(InitializeCollator, InitializeCollator, "InitializeCollator") \
     macro(InitializeDateTimeFormat, InitializeDateTimeFormat, "InitializeDateTimeFormat") \
+    macro(InitializeLocale, InitializeLocale, "InitializeLocale") \
     macro(InitializeNumberFormat, InitializeNumberFormat, "InitializeNumberFormat") \
     macro(InitializePluralRules, InitializePluralRules, "InitializePluralRules") \
     macro(InitializeRelativeTimeFormat, InitializeRelativeTimeFormat, "InitializeRelativeTimeFormat") \
@@ -209,6 +230,7 @@
     macro(js, js, "js") \
     macro(keys, keys, "keys") \
     macro(label, label, "label") \
+    macro(language, language, "language") \
     macro(lastIndex, lastIndex, "lastIndex") \
     macro(LegacyGeneratorCloseInternal, LegacyGeneratorCloseInternal, "LegacyGeneratorCloseInternal") \
     macro(length, length, "length") \
@@ -217,6 +239,7 @@
     macro(lineNumber, lineNumber, "lineNumber") \
     macro(literal, literal, "literal") \
     macro(loc, loc, "loc") \
+    macro(Locale, Locale, "Locale") \
     macro(locale, locale, "locale") \
     macro(lookupGetter, lookupGetter, "__lookupGetter__") \
     macro(lookupSetter, lookupSetter, "__lookupSetter__") \
@@ -225,6 +248,7 @@
     macro(maximumFractionDigits, maximumFractionDigits, "maximumFractionDigits") \
     macro(maximumSignificantDigits, maximumSignificantDigits, "maximumSignificantDigits") \
     macro(message, message, "message") \
+    macro(meta, meta, "meta") \
     macro(minDays, minDays, "minDays") \
     macro(minimumFractionDigits, minimumFractionDigits, "minimumFractionDigits") \
     macro(minimumIntegerDigits, minimumIntegerDigits, "minimumIntegerDigits") \
@@ -232,6 +256,7 @@
     macro(minusSign, minusSign, "minusSign") \
     macro(minute, minute, "minute") \
     macro(missingArguments, missingArguments, "missingArguments") \
+    macro(mode, mode, "mode") \
     macro(module, module, "module") \
     macro(Module, Module, "Module") \
     macro(ModuleInstantiate, ModuleInstantiate, "ModuleInstantiate") \
@@ -253,11 +278,13 @@
     macro(noStack, noStack, "noStack") \
     macro(notes, notes, "notes") \
     macro(NumberFormat, NumberFormat, "NumberFormat") \
+    macro(numberingSystem, numberingSystem, "numberingSystem") \
     macro(NumberFormatFormatGet, NumberFormatFormatGet, "Intl_NumberFormat_format_get") \
     macro(numeric, numeric, "numeric") \
     macro(objectArguments, objectArguments, "[object Arguments]") \
     macro(objectArray, objectArray, "[object Array]") \
     macro(objectBoolean, objectBoolean, "[object Boolean]") \
+    macro(objectBigInt, objectBigInt, "[object BigInt]") \
     macro(objectDate, objectDate, "[object Date]") \
     macro(objectError, objectError, "[object Error]") \
     macro(objectFunction, objectFunction, "[object Function]") \
@@ -292,10 +319,56 @@
     macro(prototype, prototype, "prototype") \
     macro(proxy, proxy, "proxy") \
     macro(public, public_, "public") \
+    macro(pull, pull, "pull") \
     macro(raw, raw, "raw") \
+    macro(ReadableByteStreamControllerGetDesiredSize, \
+          ReadableByteStreamControllerGetDesiredSize, \
+          "ReadableByteStreamControllerGetDesiredSize") \
+    macro(ReadableByteStreamController_close, \
+          ReadableByteStreamController_close, \
+          "ReadableByteStreamController_close") \
+    macro(ReadableByteStreamController_enqueue, \
+          ReadableByteStreamController_enqueue, \
+          "ReadableByteStreamController_enqueue") \
+    macro(ReadableByteStreamController_error, \
+          ReadableByteStreamController_error, \
+          "ReadableByteStreamController_error") \
+    macro(ReadableStreamBYOBReader_cancel, \
+          ReadableStreamBYOBReader_cancel, \
+          "ReadableStreamBYOBReader_cancel") \
+    macro(ReadableStreamBYOBReader_read, \
+          ReadableStreamBYOBReader_read, \
+          "ReadableStreamBYOBReader_read") \
+    macro(ReadableStreamBYOBReader_releaseLock, \
+          ReadableStreamBYOBReader_releaseLock, \
+          "ReadableStreamBYOBReader_releaseLock") \
+    macro(ReadableStream_cancel, ReadableStream_cancel, "ReadableStream_cancel") \
+    macro(ReadableStreamDefaultControllerGetDesiredSize, \
+          ReadableStreamDefaultControllerGetDesiredSize, \
+          "ReadableStreamDefaultControllerGetDesiredSize") \
+    macro(ReadableStreamDefaultController_close, \
+          ReadableStreamDefaultController_close, \
+          "ReadableStreamDefaultController_close") \
+    macro(ReadableStreamDefaultController_enqueue, \
+          ReadableStreamDefaultController_enqueue, \
+          "ReadableStreamDefaultController_enqueue") \
+    macro(ReadableStreamDefaultController_error, \
+          ReadableStreamDefaultController_error, \
+          "ReadableStreamDefaultController_error") \
+    macro(ReadableStreamDefaultReader_cancel, \
+          ReadableStreamDefaultReader_cancel, \
+          "ReadableStreamDefaultReader_cancel") \
+    macro(ReadableStreamDefaultReader_read, \
+          ReadableStreamDefaultReader_read, \
+          "ReadableStreamDefaultReader_read") \
+    macro(ReadableStreamDefaultReader_releaseLock, \
+          ReadableStreamDefaultReader_releaseLock, \
+          "ReadableStreamDefaultReader_releaseLock") \
+    macro(ReadableStreamTee, ReadableStreamTee, "ReadableStreamTee") \
     macro(reason, reason, "reason") \
     macro(RegExpFlagsGetter, RegExpFlagsGetter, "RegExpFlagsGetter") \
     macro(RegExpStringIterator, RegExpStringIterator, "RegExp String Iterator") \
+    macro(region, region, "region") \
     macro(Reify, Reify, "Reify") \
     macro(reject, reject, "reject") \
     macro(rejected, rejected, "rejected") \
@@ -326,6 +399,7 @@
     macro(StarGeneratorNext, StarGeneratorNext, "StarGeneratorNext") \
     macro(StarGeneratorReturn, StarGeneratorReturn, "StarGeneratorReturn") \
     macro(StarGeneratorThrow, StarGeneratorThrow, "StarGeneratorThrow") \
+    macro(start, start, "start") \
     macro(startTimestamp, startTimestamp, "startTimestamp") \
     macro(state, state, "state") \
     macro(static, static_, "static") \
@@ -406,5 +480,6 @@
     macro(boolean, boolean, "boolean") \
     macro(null, null, "null") \
     macro(symbol, symbol, "symbol") \
+    macro(bigint, bigint, "bigint") \
 
 #endif /* vm_CommonPropertyNames_h */

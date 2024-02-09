@@ -121,6 +121,9 @@ CodeGeneratorX64::visitUnbox(LUnbox* unbox)
           case MIRType::Symbol:
             cond = masm.testSymbol(Assembler::NotEqual, value);
             break;
+          case MIRType::BigInt:
+            cond = masm.testBigInt(Assembler::NotEqual, value);
+            break;
           default:
             MOZ_CRASH("Given MIRType cannot be unboxed.");
         }
@@ -144,6 +147,9 @@ CodeGeneratorX64::visitUnbox(LUnbox* unbox)
         break;
       case MIRType::Symbol:
         masm.unboxSymbol(input, result);
+        break;
+      case MIRType::BigInt:
+        masm.unboxBigInt(input, result);
         break;
       default:
         MOZ_CRASH("Given MIRType cannot be unboxed.");
@@ -410,8 +416,6 @@ CodeGeneratorX64::wasmStore(const wasm::MemoryAccessDesc& access, const LAllocat
                             Operand dstAddr)
 {
     if (value->isConstant()) {
-        MOZ_ASSERT(!access.isSimd());
-
         masm.memoryBarrier(access.barrierBefore());
 
         const MConstant* mir = value->toConstant();
@@ -434,11 +438,9 @@ CodeGeneratorX64::wasmStore(const wasm::MemoryAccessDesc& access, const LAllocat
           case Scalar::Int64:
           case Scalar::Float32:
           case Scalar::Float64:
-          case Scalar::Float32x4:
-          case Scalar::Int8x16:
-          case Scalar::Int16x8:
-          case Scalar::Int32x4:
           case Scalar::Uint8Clamped:
+          case Scalar::BigInt64:
+          case Scalar::BigUint64:
           case Scalar::MaxTypedArrayViewType:
             MOZ_CRASH("unexpected array type");
         }
@@ -522,7 +524,6 @@ CodeGeneratorX64::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
     const LDefinition* out = ins->output();
 
     Scalar::Type accessType = mir->access().type();
-    MOZ_ASSERT(!Scalar::isSimdType(accessType));
 
     Operand srcAddr = ptr->isBogus()
                       ? Operand(HeapReg, mir->offset())
@@ -544,7 +545,6 @@ CodeGeneratorX64::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
     const LAllocation* value = ins->value();
 
     Scalar::Type accessType = mir->access().type();
-    MOZ_ASSERT(!Scalar::isSimdType(accessType));
 
     canonicalizeIfDeterministic(accessType, value);
 
@@ -792,6 +792,24 @@ CodeGeneratorX64::visitExtendInt32ToInt64(LExtendInt32ToInt64* lir)
         masm.movl(ToOperand(input), output);
     else
         masm.movslq(ToOperand(input), output);
+}
+
+void
+CodeGeneratorX64::visitSignExtendInt64(LSignExtendInt64* ins)
+{
+    Register64 input = ToRegister64(ins->getInt64Operand(0));
+    Register64 output = ToOutRegister64(ins);
+    switch (ins->mode()) {
+      case MSignExtendInt64::Byte:
+        masm.movsbq(Operand(input.reg), output.reg);
+        break;
+      case MSignExtendInt64::Half:
+        masm.movswq(Operand(input.reg), output.reg);
+        break;
+      case MSignExtendInt64::Word:
+        masm.movslq(Operand(input.reg), output.reg);
+        break;
+    }
 }
 
 void

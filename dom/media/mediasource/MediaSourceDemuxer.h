@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -46,8 +45,8 @@ public:
   void NotifyDataArrived() override;
 
   /* interface for TrackBuffersManager */
-  void AttachSourceBuffer(TrackBuffersManager* aSourceBuffer);
-  void DetachSourceBuffer(TrackBuffersManager* aSourceBuffer);
+  void AttachSourceBuffer(RefPtr<TrackBuffersManager>& aSourceBuffer);
+  void DetachSourceBuffer(RefPtr<TrackBuffersManager>& aSourceBuffer);
   AutoTaskQueue* GetTaskQueue() { return mTaskQueue; }
 
   // Returns a string describing the state of the MediaSource internal
@@ -65,10 +64,10 @@ private:
   // Scan source buffers and update information.
   bool ScanSourceBuffersForContent();
   RefPtr<InitPromise> AttemptInit();
-  TrackBuffersManager* GetManager(TrackInfo::TrackType aType);
+  RefPtr<TrackBuffersManager> GetManager(TrackInfo::TrackType aType);
   TrackInfo* GetTrackInfo(TrackInfo::TrackType);
-  void DoAttachSourceBuffer(TrackBuffersManager* aSourceBuffer);
-  void DoDetachSourceBuffer(TrackBuffersManager* aSourceBuffer);
+  void DoAttachSourceBuffer(RefPtr<TrackBuffersManager>&& aSourceBuffer);
+  void DoDetachSourceBuffer(const RefPtr<TrackBuffersManager>& aSourceBuffer);
   bool OnTaskQueue()
   {
     return !GetTaskQueue() || GetTaskQueue()->IsCurrentThreadIn();

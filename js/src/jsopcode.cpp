@@ -149,7 +149,7 @@ js::StackDefs(JSScript* script, jsbytecode* pc)
 
 const char * PCCounts::numExecName = "interp";
 
-static MOZ_MUST_USE bool
+[[nodiscard]] static bool
 DumpIonScriptCounts(Sprinter* sp, HandleScript script, jit::IonScriptCounts* ionCounts)
 {
     if (!sp->jsprintf("IonScript [%" PRIuSIZE " blocks]:\n", ionCounts->numBlocks()))
@@ -181,7 +181,7 @@ DumpIonScriptCounts(Sprinter* sp, HandleScript script, jit::IonScriptCounts* ion
     return true;
 }
 
-static MOZ_MUST_USE bool
+[[nodiscard]] static bool
 DumpPCCounts(JSContext* cx, HandleScript script, Sprinter* sp)
 {
     MOZ_ASSERT(script->hasScriptCounts());
@@ -696,7 +696,7 @@ js::ReconstructStackDepth(JSContext* cx, JSScript* script, jsbytecode* pc, uint3
  * current line. If showAll is true, include the source note type and the
  * entry stack depth.
  */
-static MOZ_MUST_USE bool
+[[nodiscard]] static bool
 DisassembleAtPC(JSContext* cx, JSScript* scriptArg, bool lines,
                 jsbytecode* pc, bool showAll, Sprinter* sp)
 {
@@ -1039,6 +1039,9 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
         break;
       }
 
+      case JOF_BIGINT:
+        // Fallthrough.
+
       case JOF_DOUBLE: {
         RootedValue v(cx, script->getConst(GET_UINT32_INDEX(pc)));
         JSAutoByteString bytes;
@@ -1330,7 +1333,7 @@ ExpressionDecompiler::decompilePC(jsbytecode* pc)
                write("]");
       case JSOP_GETELEM_SUPER:
         return write("super[") &&
-               decompilePCForStackOperand(pc, -3) &&
+               decompilePCForStackOperand(pc, -2) &&
                write("]");
       case JSOP_NULL:
         return write(js_null_str);
@@ -1858,7 +1861,7 @@ js::GetPCCountScriptCount(JSContext* cx)
 
 enum MaybeComma {NO_COMMA, COMMA};
 
-static MOZ_MUST_USE bool
+[[nodiscard]] static bool
 AppendJSONProperty(StringBuffer& buf, const char* name, MaybeComma comma = COMMA)
 {
     if (comma && !buf.append(','))

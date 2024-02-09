@@ -276,7 +276,7 @@ RangeAnalysis::addBetaNodes()
             if (!compare->isNumericComparison())
                 continue;
             // Otherwise fall through to handle JSOP_STRICTEQ the same as JSOP_EQ.
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
           case JSOP_EQ:
             comp.setDouble(bound, bound);
             break;
@@ -285,7 +285,7 @@ RangeAnalysis::addBetaNodes()
             if (!compare->isNumericComparison())
                 continue;
             // Otherwise fall through to handle JSOP_STRICTNE the same as JSOP_NE.
-            MOZ_FALLTHROUGH;
+            [[fallthrough]];
           case JSOP_NE:
             // Negative zero is not not-equal to zero.
             if (bound == 0) {
@@ -1742,6 +1742,12 @@ MTruncateToInt32::computeRange(TempAllocator& alloc)
 }
 
 void
+MToNumeric::computeRange(TempAllocator& alloc)
+{
+    setRange(new (alloc) Range(getOperand(0)));
+}
+
+void
 MToInt32::computeRange(TempAllocator& alloc)
 {
     // No clamping since this computes the range *before* bailouts.
@@ -1780,13 +1786,11 @@ GetTypedArrayRange(TempAllocator& alloc, Scalar::Type type)
       case Scalar::Int32:
         return Range::NewInt32Range(alloc, INT32_MIN, INT32_MAX);
 
+      case Scalar::BigInt64:
+      case Scalar::BigUint64:
       case Scalar::Int64:
       case Scalar::Float32:
       case Scalar::Float64:
-      case Scalar::Float32x4:
-      case Scalar::Int8x16:
-      case Scalar::Int16x8:
-      case Scalar::Int32x4:
       case Scalar::MaxTypedArrayViewType:
         break;
     }

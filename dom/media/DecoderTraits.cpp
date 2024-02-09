@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -290,6 +289,7 @@ bool DecoderTraits::ShouldHandleMediaType(const char* aMIMEType,
     return false;
   }
 
+#ifdef MOZ_ENABLE_NPAPI
   // If an external plugin which can handle quicktime video is available
   // (and not disabled), prefer it over native playback as there are
   // several codecs found in the wild that we do not handle.
@@ -300,6 +300,7 @@ bool DecoderTraits::ShouldHandleMediaType(const char* aMIMEType,
       return false;
     }
   }
+#endif
 
   MediaContentType parsed{nsDependentCString(aMIMEType)};
   return CanHandleMediaType(parsed, aDiagnostics)

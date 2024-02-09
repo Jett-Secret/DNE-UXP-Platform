@@ -83,10 +83,6 @@
 #include "GLContextProvider.h"
 #include "mozilla/gfx/Logging.h"
 
-#if defined(MOZ_WIDGET_GTK)
-#include "gfxPlatformGtk.h" // xxx - for UseFcFontList
-#endif
-
 #ifdef USE_SKIA
 # ifdef __GNUC__
 #  pragma GCC diagnostic push
@@ -616,16 +612,9 @@ gfxPlatform::Init()
 
     nsresult rv;
 
-    bool usePlatformFontList = true;
-#if defined(MOZ_WIDGET_GTK)
-    usePlatformFontList = gfxPlatformGtk::UseFcFontList();
-#endif
-
-    if (usePlatformFontList) {
-        rv = gfxPlatformFontList::Init();
-        if (NS_FAILED(rv)) {
-            NS_RUNTIMEABORT("Could not initialize gfxPlatformFontList");
-        }
+    rv = gfxPlatformFontList::Init();
+    if (NS_FAILED(rv)) {
+        NS_RUNTIMEABORT("Could not initialize gfxPlatformFontList");
     }
 
     gPlatform->mScreenReferenceSurface =
@@ -1064,16 +1053,6 @@ gfxPlatform::GetWrappedDataSourceSurface(gfxASurface* aSurface)
   return result.forget();
 }
 
-already_AddRefed<ScaledFont>
-gfxPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
-{
-  NativeFont nativeFont;
-  nativeFont.mType = NativeFontType::CAIRO_FONT_FACE;
-  nativeFont.mFont = aFont->GetCairoScaledFont();
-  return Factory::CreateScaledFontForNativeFont(nativeFont,
-                                                aFont->GetAdjustedSize());
-}
-
 void
 gfxPlatform::ComputeTileSize()
 {
@@ -1325,7 +1304,12 @@ gfxPlatform::CreateSimilarSoftwareDrawTarget(DrawTarget* aDT,
   if (Factory::DoesBackendSupportDataDrawtarget(aDT->GetBackendType())) {
     dt = aDT->CreateSimilarDrawTarget(aSize, aFormat);
   } else {
-    dt = Factory::CreateDrawTarget(BackendType::SKIA, aSize, aFormat);
+#ifdef USE_SKIA
+    BackendType backendType = BackendType::SKIA;
+#else
+    BackendType backendType = BackendType::CAIRO;
+#endif
+    dt = Factory::CreateDrawTarget(backendType, aSize, aFormat);
   }
 
   return dt.forget();
@@ -1338,7 +1322,11 @@ gfxPlatform::CreateDrawTargetForData(unsigned char* aData, const IntSize& aSize,
   NS_ASSERTION(backendType != BackendType::NONE, "No backend.");
 
   if (!Factory::DoesBackendSupportDataDrawtarget(backendType)) {
+#ifdef USE_SKIA
+    backendType = BackendType::SKIA;
+#else
     backendType = BackendType::CAIRO;
+#endif
   }
 
   RefPtr<DrawTarget> dt = Factory::CreateDrawTargetForData(backendType,
@@ -2156,19 +2144,6 @@ gfxPlatform::DisableBufferRotation()
   MutexAutoLock autoLock(*gGfxPlatformPrefsLock);
 
   sBufferRotationCheckPref = false;
-}
-
-already_AddRefed<ScaledFont>
-gfxPlatform::GetScaledFontForFontWithCairoSkia(DrawTarget* aTarget, gfxFont* aFont)
-{
-    NativeFont nativeFont;
-    if (aTarget->GetBackendType() == BackendType::CAIRO || aTarget->GetBackendType() == BackendType::SKIA) {
-        nativeFont.mType = NativeFontType::CAIRO_FONT_FACE;
-        nativeFont.mFont = aFont->GetCairoScaledFont();
-        return Factory::CreateScaledFontForNativeFont(nativeFont, aFont->GetAdjustedSize());
-    }
-
-    return nullptr;
 }
 
 /* static */ bool

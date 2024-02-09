@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: sw=4 ts=4 et :
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,10 +10,12 @@
 #include "mozilla/plugins/PPluginInstanceChild.h"
 #include "mozilla/plugins/PluginScriptableObjectChild.h"
 #include "mozilla/plugins/StreamNotifyChild.h"
+#ifdef MOZ_ENABLE_NPAPI
 #include "mozilla/plugins/PPluginSurfaceChild.h"
+#endif
 #include "mozilla/ipc/CrossProcessMutex.h"
 #include "nsRefPtrHashtable.h"
-#if defined(OS_WIN)
+#if defined(OS_WIN) && defined (MOZ_ENABLE_NPAPI)
 #include "mozilla/gfx/SharedDIBWin.h"
 #elif defined(MOZ_WIDGET_COCOA)
 #include "PluginUtilsOSX.h"
@@ -114,7 +115,7 @@ protected:
     DoAsyncSetWindow(const gfxSurfaceType& aSurfaceType,
                      const NPRemoteWindow& aWindow,
                      bool aIsAsync);
-
+#ifdef MOZ_ENABLE_NPAPI
     virtual PPluginSurfaceChild*
     AllocPPluginSurfaceChild(const WindowsSharedMemoryHandle&,
                              const gfx::IntSize&, const bool&) override {
@@ -125,6 +126,7 @@ protected:
         delete s;
         return true;
     }
+#endif
 
     virtual bool
     AnswerPaint(const NPRemoteEvent& event, int16_t* handled) override
@@ -278,7 +280,7 @@ public:
                    const NativeEventData& aKeyEventData,
                    const bool& aIsConsumed) override;
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) && defined(MOZ_ENABLE_NPAPI)
     NPError DefaultAudioDeviceChanged(NPAudioDeviceChangeDetails& details);
 #endif
 
@@ -622,7 +624,7 @@ private:
     // alpha recovery otherwise.
     RefPtr<gfxASurface> mBackground;
 
-#ifdef XP_WIN
+#if defined(XP_WIN) && defined(MOZ_ENABLE_NPAPI)
     // These actors mirror mCurrentSurface/mBackSurface
     PPluginSurfaceChild* mCurrentSurfaceActor;
     PPluginSurfaceChild* mBackSurfaceActor;

@@ -1,6 +1,7 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
  *
  * Copyright 2014 Mozilla Foundation
+ * Copyright 2023 Moonchild Productions
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +39,7 @@ typedef frontend::Parser<frontend::FullParseHandler> AsmJSParser;
 // indeterminate amount and the entire function should be reparsed from the
 // beginning.
 
-extern MOZ_MUST_USE bool
+[[nodiscard]] extern bool
 CompileAsmJS(ExclusiveContext* cx, AsmJSParser& parser, frontend::ParseNode* stmtList,
              bool* validated);
 
@@ -55,6 +56,9 @@ IsAsmJSFunction(JSFunction* fun);
 
 extern bool
 IsAsmJSStrictModeModuleOrFunction(JSFunction* fun);
+
+extern bool
+InstantiateAsmJS(JSContext* cx, unsigned argc, JS::Value* vp);
 
 // asm.js testing natives:
 

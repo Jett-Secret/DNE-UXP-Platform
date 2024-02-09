@@ -67,6 +67,7 @@ static bool sWebkitPrefixedAliasesEnabled;
 static bool sWebkitDevicePixelRatioEnabled;
 static bool sMozGradientsEnabled;
 static bool sControlCharVisibility;
+static bool sLegacyNegationPseudoClassEnabled;
 
 const uint32_t
 nsCSSProps::kParserVariantTable[eCSSProperty_COUNT_no_shorthands] = {
@@ -109,6 +110,20 @@ enum class GridTrackListFlags {
 };
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(GridTrackListFlags)
 
+/**
+ * Additional information about a selector being parsed.
+ */
+enum class SelectorParsingFlags {
+  eNone                    = 0,
+  eIsNegated               = 1 << 0,
+  eIsForgiving             = 1 << 1,
+  eDisallowCombinators     = 1 << 2,
+  eDisallowPseudoElements  = 1 << 3,
+  eInheritNamespace        = 1 << 4,
+  eForceEmptyList          = 1 << 5
+};
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(SelectorParsingFlags)
+
 namespace {
 
 // Rule processing function
@@ -120,6 +135,22 @@ struct CSSParserInputState {
   nsCSSScannerPosition mPosition;
   nsCSSToken mToken;
   bool mHavePushBack;
+};
+
+struct ReduceNumberCalcOps : public mozilla::css::BasicFloatCalcOps,
+                             public mozilla::css::CSSValueInputCalcOps
+{
+  result_type ComputeLeafValue(const nsCSSValue& aValue)
+  {
+    // FIXME: Restore this assertion once ParseColor no longer uses this class.
+    //MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Number, "unexpected unit");
+    return aValue.GetFloatValue();
+  }
+
+  float ComputeNumber(const nsCSSValue& aValue)
+  {
+    return mozilla::css::ComputeCalc(aValue, *this);
+  }
 };
 
 static_assert(css::eAuthorSheetFeatures == 0 &&
@@ -645,6 +676,11 @@ protected:
   bool SkipAtRule(bool aInsideBlock);
   bool SkipDeclaration(bool aCheckForBraces);
 
+  // Returns true when the target token type is found, and false for the
+  // end of declaration, start of !important flag, end of declaration
+  // block, or EOF.
+  bool LookForTokenType(nsCSSTokenType aType);
+
   void PushGroup(css::GroupRule* aRule);
   void PopGroup();
 
@@ -759,20 +795,21 @@ protected:
   // aPseudoElement and aPseudoElementArgs are the location where
   // pseudo-elements (as opposed to pseudo-classes) are stored;
   // pseudo-classes are stored on aSelector.  aPseudoElement and
-  // aPseudoElementArgs must be non-null iff !aIsNegated.
-  nsSelectorParsingStatus ParsePseudoSelector(int32_t&       aDataMask,
-                                              nsCSSSelector& aSelector,
-                                              bool           aIsNegated,
-                                              nsIAtom**      aPseudoElement,
-                                              nsAtomList**   aPseudoElementArgs,
+  // aPseudoElementArgs must be non-null iff the eIsNegated flag of
+  // aFlags is not set.
+  nsSelectorParsingStatus ParsePseudoSelector(int32_t&              aDataMask,
+                                              nsCSSSelector&        aSelector,
+                                              SelectorParsingFlags& aFlags,
+                                              nsIAtom**             aPseudoElement,
+                                              nsAtomList**          aPseudoElementArgs,
                                               CSSPseudoElementType* aPseudoElementType);
 
   nsSelectorParsingStatus ParseAttributeSelector(int32_t&       aDataMask,
                                                  nsCSSSelector& aSelector);
 
-  nsSelectorParsingStatus ParseTypeOrUniversalSelector(int32_t&       aDataMask,
-                                                       nsCSSSelector& aSelector,
-                                                       bool           aIsNegated);
+  nsSelectorParsingStatus ParseTypeOrUniversalSelector(int32_t&              aDataMask,
+                                                       nsCSSSelector&        aSelector,
+                                                       SelectorParsingFlags& aFlags);
 
   nsSelectorParsingStatus ParsePseudoClassWithIdentArg(nsCSSSelector& aSelector,
                                                        CSSPseudoClassType aType);
@@ -781,17 +818,23 @@ protected:
                                                          CSSPseudoClassType aType);
 
   nsSelectorParsingStatus ParsePseudoClassWithSelectorListArg(nsCSSSelector& aSelector,
-                                                              CSSPseudoClassType aType);
+                                                              CSSPseudoClassType aType,
+                                                              SelectorParsingFlags& aFlags);
 
-  nsSelectorParsingStatus ParseNegatedSimpleSelector(int32_t&       aDataMask,
-                                                     nsCSSSelector& aSelector);
+  nsSelectorParsingStatus ParseNegatedSimpleSelector(int32_t&              aDataMask,
+                                                     nsCSSSelector&        aSelector,
+                                                     SelectorParsingFlags& aFlags);
 
   // If aStopChar is non-zero, the selector list is done when we hit
   // aStopChar.  Otherwise, it's done when we hit EOF.
   bool ParseSelectorList(nsCSSSelectorList*& aListHead,
-                           char16_t aStopChar);
-  bool ParseSelectorGroup(nsCSSSelectorList*& aListHead);
-  bool ParseSelector(nsCSSSelectorList* aList, char16_t aPrevCombinator);
+                         char16_t aStopChar,
+                         SelectorParsingFlags& aFlags);
+  bool ParseSelectorGroup(nsCSSSelectorList*& aListHead,
+                          SelectorParsingFlags& aFlags);
+  bool ParseSelector(nsCSSSelectorList* aList,
+                     char16_t aPrevCombinator,
+                     SelectorParsingFlags& aFlags);
 
   enum {
     eParseDeclaration_InBraces           = 1 << 0,
@@ -873,6 +916,7 @@ protected:
   };
 
   bool IsFunctionTokenValidForImageLayerImage(const nsCSSToken& aToken) const;
+  bool IsCalcFunctionToken(const nsCSSToken& aToken) const;
   bool ParseImageLayersItem(ImageLayersShorthandParseState& aState,
                             const nsCSSPropertyID aTable[]);
 
@@ -1035,6 +1079,7 @@ protected:
   bool ParseFontSrc(nsCSSValue& aValue);
   bool ParseFontSrcFormat(InfallibleTArray<nsCSSValue>& values);
   bool ParseFontRanges(nsCSSValue& aValue);
+  bool ParseInset();
   bool ParseListStyle();
   bool ParseListStyleType(nsCSSValue& aValue);
   bool ParseMargin();
@@ -2320,7 +2365,8 @@ CSSParserImpl::ParseSelectorString(const nsSubstring& aSelectorString,
   css::ErrorReporter reporter(scanner, mSheet, mChildLoader, aURI);
   InitScanner(scanner, reporter, aURI, aURI, nullptr);
 
-  bool success = ParseSelectorList(*aSelectorList, char16_t(0));
+  SelectorParsingFlags flags = SelectorParsingFlags::eNone;
+  bool success = ParseSelectorList(*aSelectorList, char16_t(0), flags);
 
   // We deliberately do not call OUTPUT_ERROR here, because all our
   // callers map a failure return to a JS exception, and if that JS
@@ -2628,6 +2674,25 @@ StopRecordingAndAppendTokens(nsString& aResult,
   }
 }
 
+static bool
+ResolveEnvironmentVariable(const nsAString& aName,
+                           nsString& aValue,
+                           nsCSSTokenSerializationType& aFirstToken,
+                           nsCSSTokenSerializationType& aLastToken)
+{
+  // hard-code the few values of the Environment Variables spec
+  if (aName.EqualsLiteral("safe-area-inset-top") ||
+      aName.EqualsLiteral("safe-area-inset-bottom") ||
+      aName.EqualsLiteral("safe-area-inset-left") ||
+      aName.EqualsLiteral("safe-area-inset-right")) {
+    aValue.AppendLiteral(" 0px");
+    aFirstToken = eCSSTokenSerialization_Whitespace;
+    aLastToken = eCSSTokenSerialization_Dimension;
+    return true;
+  }
+  return false;
+}
+
 bool
 CSSParserImpl::ResolveValueWithVariableReferencesRec(
                                      nsString& aResult,
@@ -2745,8 +2810,10 @@ CSSParserImpl::ResolveValueWithVariableReferencesRec(
       }
 
       case eCSSToken_Function:
-        if (mToken.mIdent.LowerCaseEqualsLiteral("var")) {
-          // Save the tokens before the "var(" to our resolved value.
+        if (mToken.mIdent.LowerCaseEqualsLiteral("env") ||
+            mToken.mIdent.LowerCaseEqualsLiteral("var")) {
+          bool functionIsVariable = mToken.mIdent.LowerCaseEqualsLiteral("var");
+          // Save the tokens before the "env(" to our resolved value.
           nsString recording;
           mScanner->StopRecording(recording);
           recording.Truncate(lengthBeforeVar);
@@ -2756,30 +2823,43 @@ CSSParserImpl::ResolveValueWithVariableReferencesRec(
           recLastToken = eCSSTokenSerialization_Nothing;
 
           if (!GetToken(true) ||
-              mToken.mType != eCSSToken_Ident ||
-              !nsCSSProps::IsCustomPropertyName(mToken.mIdent)) {
-            // "var(" must be followed by an identifier, and it must be a
-            // custom property name.
+              mToken.mType != eCSSToken_Ident) {
+            // function must be followed by an identifier
             return false;
           }
 
-          // Turn the custom property name into a variable name by removing the
-          // '--' prefix.
-          MOZ_ASSERT(Substring(mToken.mIdent, 0,
-                               CSS_CUSTOM_NAME_PREFIX_LENGTH).
-                       EqualsLiteral("--"));
-          nsDependentString variableName(mToken.mIdent,
-                                         CSS_CUSTOM_NAME_PREFIX_LENGTH);
-
-          // Get the value of the identified variable.  Note that we
-          // check if the variable value is the empty string, as that means
-          // that the variable was invalid at computed value time due to
-          // unresolveable variable references or cycles.
+          // Expand the function call into variableValue
           nsString variableValue;
-          nsCSSTokenSerializationType varFirstToken, varLastToken;
-          bool valid = aVariables->Get(variableName, variableValue,
-                                       varFirstToken, varLastToken) &&
-                       !variableValue.IsEmpty();
+          nsCSSTokenSerializationType varFirstToken = eCSSTokenSerialization_Nothing;
+          nsCSSTokenSerializationType varLastToken = eCSSTokenSerialization_Nothing;
+          bool valid = false;
+
+          if (functionIsVariable) {
+            if (!nsCSSProps::IsCustomPropertyName(mToken.mIdent)) {
+              // "var(" identifier must be a custom property name.
+              return false;
+            }
+
+            // Turn the custom property name into a variable name by removing the
+            // '--' prefix.
+            MOZ_ASSERT(Substring(mToken.mIdent, 0,
+                                 CSS_CUSTOM_NAME_PREFIX_LENGTH).
+                         EqualsLiteral("--"));
+            nsDependentString variableName(mToken.mIdent,
+                                           CSS_CUSTOM_NAME_PREFIX_LENGTH);
+
+            // Get the value of the identified variable.  Note that we
+            // check if the variable value is the empty string, as that means
+            // that the variable was invalid at computed value time due to
+            // unresolveable variable references or cycles.
+            valid = aVariables->Get(variableName, variableValue,
+                                    varFirstToken, varLastToken) &&
+                    !variableValue.IsEmpty();
+          } else {
+            valid = ResolveEnvironmentVariable(mToken.mIdent, variableValue,
+                                               varFirstToken,varLastToken) &&
+                    !variableValue.IsEmpty();
+          }
 
           if (!GetToken(true) ||
               mToken.IsSymbol(')')) {
@@ -4500,7 +4580,7 @@ CSSParserImpl::ParseKeyframeSelectorList(InfallibleTArray<float>& aSelectorList)
           value = 1.0f;
           break;
         }
-        MOZ_FALLTHROUGH;
+        [[fallthrough]];
       default:
         UngetToken();
         // The first time through the loop, this means we got an empty
@@ -5344,6 +5424,32 @@ CSSParserImpl::SkipDeclaration(bool aCheckForBraces)
   return true;
 }
 
+bool
+CSSParserImpl::LookForTokenType(nsCSSTokenType aType) {
+  bool rv = false;
+  CSSParserInputState stateBeforeValue;
+  SaveInputState(stateBeforeValue);
+
+  const char16_t stopChars[] = { ';', '!', '}', 0 };
+  nsDependentString stopSymbolChars(stopChars);
+  while (GetToken(true)) {
+    if (mToken.mType == aType) {
+      rv = true;
+      break;
+    }
+    // Stop looking if we're at the end of the declaration, encountered an
+    // !important flag, or at the end of the declaration block.
+    if (mToken.mType == eCSSToken_Symbol &&
+        stopSymbolChars.FindChar(mToken.mSymbol) != -1) {
+      rv = false;
+      break;
+    }
+  }
+
+  RestoreSavedInputState(stateBeforeValue);
+  return rv;
+}
+
 void
 CSSParserImpl::SkipRuleSet(bool aInsideBraces)
 {
@@ -5407,9 +5513,10 @@ CSSParserImpl::ParseRuleSet(RuleAppendFunc aAppendFunc, void* aData,
 {
   // First get the list of selectors for the rule
   nsCSSSelectorList* slist = nullptr;
+  SelectorParsingFlags flags = SelectorParsingFlags::eNone;
   uint32_t linenum, colnum;
   if (!GetNextTokenLocation(true, &linenum, &colnum) ||
-      !ParseSelectorList(slist, char16_t('{'))) {
+      !ParseSelectorList(slist, char16_t('{'), flags)) {
     REPORT_UNEXPECTED(PEBadSelectorRSIgnored);
     OUTPUT_ERROR();
     SkipRuleSet(aInsideBraces);
@@ -5445,13 +5552,20 @@ CSSParserImpl::ParseRuleSet(RuleAppendFunc aAppendFunc, void* aData,
 
 bool
 CSSParserImpl::ParseSelectorList(nsCSSSelectorList*& aListHead,
-                                 char16_t aStopChar)
+                                 char16_t aStopChar,
+                                 SelectorParsingFlags& aFlags)
 {
   nsCSSSelectorList* list = nullptr;
-  if (! ParseSelectorGroup(list)) {
-    // must have at least one selector group
-    aListHead = nullptr;
-    return false;
+  if (! ParseSelectorGroup(list, aFlags)) {
+    if (aFlags & SelectorParsingFlags::eIsForgiving) {
+      // Initialize to an empty list if the first selector group was invalid
+      // and we're a forgiving selector list.
+      list = new nsCSSSelectorList();
+    } else {
+      // must have at least one selector group
+      aListHead = nullptr;
+      return false;
+    }
   }
   NS_ASSERTION(nullptr != list, "no selector list");
   aListHead = list;
@@ -5473,11 +5587,23 @@ CSSParserImpl::ParseSelectorList(nsCSSSelectorList*& aListHead,
       if (',' == tk->mSymbol) {
         nsCSSSelectorList* newList = nullptr;
         // Another selector group must follow
-        if (! ParseSelectorGroup(newList)) {
+        if (! ParseSelectorGroup(newList, aFlags)) {
+          // Ignore invalid selectors if we're a forgiving selector list.
+          if (aFlags & SelectorParsingFlags::eIsForgiving) {
+            continue;
+          }
           break;
         }
-        // add new list to the end of the selector list
-        list->mNext = newList;
+        // Replace the list head if: it's empty and we're a forgiving selector
+        // list. Otherwise, add the new list to the end of the selector list.
+        if ((aFlags & SelectorParsingFlags::eIsForgiving) &&
+            !aListHead->mSelectors) {
+          MOZ_ASSERT(newList->mSelectors,
+                     "replacing empty list head with an empty selector list?");
+          aListHead = newList;
+        } else {
+          list->mNext = newList;
+        }
         list = newList;
         continue;
       } else if (aStopChar == tk->mSymbol && aStopChar != char16_t(0)) {
@@ -5485,9 +5611,12 @@ CSSParserImpl::ParseSelectorList(nsCSSSelectorList*& aListHead,
         return true;
       }
     }
-    REPORT_UNEXPECTED_TOKEN(PESelectorListExtra);
-    UngetToken();
-    break;
+    
+    if (!(aFlags & SelectorParsingFlags::eIsForgiving)) {
+      REPORT_UNEXPECTED_TOKEN(PESelectorListExtra);
+      UngetToken();
+      break;
+    }
   }
 
   delete aListHead;
@@ -5507,13 +5636,14 @@ static bool IsUniversalSelector(const nsCSSSelector& aSelector)
 }
 
 bool
-CSSParserImpl::ParseSelectorGroup(nsCSSSelectorList*& aList)
+CSSParserImpl::ParseSelectorGroup(nsCSSSelectorList*& aList,
+                                  SelectorParsingFlags& aFlags)
 {
   char16_t combinator = 0;
   nsAutoPtr<nsCSSSelectorList> list(new nsCSSSelectorList());
 
   for (;;) {
-    if (!ParseSelector(list, combinator)) {
+    if (!ParseSelector(list, combinator, aFlags)) {
       return false;
     }
 
@@ -5546,6 +5676,10 @@ CSSParserImpl::ParseSelectorGroup(nsCSSSelectorList*& aList)
 
     if (!combinator) {
       REPORT_UNEXPECTED_TOKEN(PESelectorListExtra);
+      return false;
+    }
+    
+    if (aFlags & SelectorParsingFlags::eDisallowCombinators) {
       return false;
     }
   }
@@ -5604,9 +5738,9 @@ CSSParserImpl::ParseClassSelector(int32_t&       aDataMask,
 // namespace|type or namespace|* or *|* or *
 //
 CSSParserImpl::nsSelectorParsingStatus
-CSSParserImpl::ParseTypeOrUniversalSelector(int32_t&       aDataMask,
-                                            nsCSSSelector& aSelector,
-                                            bool           aIsNegated)
+CSSParserImpl::ParseTypeOrUniversalSelector(int32_t&              aDataMask,
+                                            nsCSSSelector&        aSelector,
+                                            SelectorParsingFlags& aFlags)
 {
   nsAutoString buffer;
   if (mToken.IsSymbol('*')) {  // universal element selector, or universal namespace
@@ -5710,10 +5844,12 @@ CSSParserImpl::ParseTypeOrUniversalSelector(int32_t&       aDataMask,
     }
   }
   else {
-    SetDefaultNamespaceOnSelector(aSelector);
+    if (!(aFlags & SelectorParsingFlags::eInheritNamespace)) {
+      SetDefaultNamespaceOnSelector(aSelector);
+    }
   }
 
-  if (aIsNegated) {
+  if (aFlags & SelectorParsingFlags::eIsNegated) {
     // restore last token read in case of a negated type selector
     UngetToken();
   }
@@ -5965,16 +6101,17 @@ CSSParserImpl::ParseAttributeSelector(int32_t&       aDataMask,
 // Parse pseudo-classes and pseudo-elements
 //
 CSSParserImpl::nsSelectorParsingStatus
-CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
-                                   nsCSSSelector& aSelector,
-                                   bool           aIsNegated,
-                                   nsIAtom**      aPseudoElement,
-                                   nsAtomList**   aPseudoElementArgs,
+CSSParserImpl::ParsePseudoSelector(int32_t&              aDataMask,
+                                   nsCSSSelector&        aSelector,
+                                   SelectorParsingFlags& aFlags,
+                                   nsIAtom**             aPseudoElement,
+                                   nsAtomList**          aPseudoElementArgs,
                                    CSSPseudoElementType* aPseudoElementType)
 {
-  NS_ASSERTION(aIsNegated || (aPseudoElement && aPseudoElementArgs),
+  bool isNegated = !!(aFlags & SelectorParsingFlags::eIsNegated);
+  NS_ASSERTION(isNegated || (aPseudoElement && aPseudoElementArgs),
                "expected location to store pseudo element");
-  NS_ASSERTION(!aIsNegated || (!aPseudoElement && !aPseudoElementArgs),
+  NS_ASSERTION(!isNegated || (!aPseudoElement && !aPseudoElementArgs),
                "negated selectors shouldn't have a place to store "
                "pseudo elements");
   if (! GetToken(false)) { // premature eof
@@ -6013,10 +6150,14 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
   CSSEnabledState enabledState = EnabledState();
   CSSPseudoElementType pseudoElementType =
     nsCSSPseudoElements::GetPseudoType(pseudo, enabledState);
+  bool pseudoElementIsTreeAbiding =
+    nsCSSPseudoElements::IsTreeAbidingPseudoElement(pseudoElementType);
   CSSPseudoClassType pseudoClassType =
     nsCSSPseudoClasses::GetPseudoType(pseudo, enabledState);
   bool pseudoClassIsUserAction =
     nsCSSPseudoClasses::IsUserActionPseudoClass(pseudoClassType);
+  bool pseudoClassHasForgivingSelectorListArg =
+    nsCSSPseudoClasses::HasForgivingSelectorListArg(pseudoClassType);
 
   if (nsCSSAnonBoxes::IsNonElement(pseudo)) {
     // Non-element anonymous boxes should not match any rule.
@@ -6034,6 +6175,23 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
       pseudoClassType = CSSPseudoClassType::NotPseudo;
     } else {
       pseudoElementType = CSSPseudoElementType::NotPseudo;
+    }
+  }
+
+  // We handle certain pseudo-elements as if they were a pseudo-class.
+  // Our platform does not have the mechanism to handle multiple
+  // pseudo-elements and proper storage if they have an argument.
+  CSSPseudoElementType hybridPseudoElementType =
+    CSSPseudoElementType::NotPseudo;
+  if (parsingPseudoElement &&
+      nsCSSPseudoElements::IsHybridPseudoElement(pseudoElementType)) {
+    hybridPseudoElementType = pseudoElementType;
+    pseudoElementType = CSSPseudoElementType::NotPseudo;
+    parsingPseudoElement = false;
+
+    if (hybridPseudoElementType == CSSPseudoElementType::slotted) {
+      pseudoClassType = CSSPseudoClassType::slotted;
+      aFlags |= SelectorParsingFlags::eDisallowCombinators;
     }
   }
 
@@ -6073,7 +6231,6 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
   // is that of a function pseudo it better be a function token
   if ((eCSSToken_Function == mToken.mType) !=
       (isTree ||
-       CSSPseudoClassType::negation == pseudoClassType ||
        nsCSSPseudoClasses::HasStringArg(pseudoClassType) ||
        nsCSSPseudoClasses::HasNthPairArg(pseudoClassType) ||
        nsCSSPseudoClasses::HasSelectorListArg(pseudoClassType)) &&
@@ -6093,43 +6250,97 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
     return eSelectorParsingStatus_Error;
   }
 
-  if (aSelector.IsPseudoElement()) {
-    CSSPseudoElementType type = aSelector.PseudoType();
+  bool forceEmptyList = false;
+  if (aSelector.IsPseudoElement() || aSelector.IsHybridPseudoElement()) {
+    CSSPseudoElementType type = aSelector.IsPseudoElement() ?
+                                aSelector.PseudoType() :
+                                aSelector.HybridPseudoType();
+    bool supportsTreeAbiding =
+      nsCSSPseudoElements::PseudoElementSupportsTreeAbiding(type);
+    bool supportsUserAction =
+      nsCSSPseudoElements::PseudoElementSupportsUserActionState(type);
     if (type >= CSSPseudoElementType::Count ||
-        !nsCSSPseudoElements::PseudoElementSupportsUserActionState(type)) {
-      // We only allow user action pseudo-classes on certain pseudo-elements.
+        (!supportsTreeAbiding && !supportsUserAction)) {
+      // We only allow user action pseudo-classes and/or tree-abiding
+      // pseudo-elements on certain pseudo-elements.
       REPORT_UNEXPECTED_TOKEN(PEPseudoSelNoUserActionPC);
       UngetToken();
       return eSelectorParsingStatus_Error;
     }
-    if (!isPseudoClass || !pseudoClassIsUserAction) {
-      // CSS 4 Selectors says that pseudo-elements can only be followed by
-      // a user action pseudo-class.
+
+    if (isPseudoClass) {
+      if (pseudoClassHasForgivingSelectorListArg) {
+        // XXX: Pseudo-classes with a forgiving selector list argument are
+        // allowed to follow a pseudo-element, but must treat any selector
+        // that is not of the same type as invalid. It doesn't make any
+        // sense, but that's the behavior of other tainted browsers.
+        forceEmptyList = true;
+      } else if (!supportsUserAction || !pseudoClassIsUserAction) {
+        // CSS 4 Selectors says that pseudo-elements can only be followed by
+        // a user action pseudo-class.
+        REPORT_UNEXPECTED_TOKEN(PEPseudoClassNotUserAction);
+        UngetToken();
+        return eSelectorParsingStatus_Error;
+      }
+    } else if (isPseudoElement &&
+               (!supportsTreeAbiding || !pseudoElementIsTreeAbiding)) {
       REPORT_UNEXPECTED_TOKEN(PEPseudoClassNotUserAction);
       UngetToken();
       return eSelectorParsingStatus_Error;
     }
   }
 
-  if (!parsingPseudoElement &&
-      CSSPseudoClassType::negation == pseudoClassType) {
-    if (aIsNegated) { // :not() can't be itself negated
-      REPORT_UNEXPECTED_TOKEN(PEPseudoSelDoubleNot);
-      UngetToken();
-      return eSelectorParsingStatus_Error;
-    }
-    // CSS 3 Negation pseudo-class takes one simple selector as argument
-    nsSelectorParsingStatus parsingStatus =
-      ParseNegatedSimpleSelector(aDataMask, aSelector);
-    if (eSelectorParsingStatus_Continue != parsingStatus) {
-      return parsingStatus;
-    }
-  }
-  else if (!parsingPseudoElement && isPseudoClass) {
+  bool disallowPseudoElements =
+    !!(aFlags & SelectorParsingFlags::eDisallowPseudoElements);
+  if (!parsingPseudoElement && isPseudoClass) {
     aDataMask |= SEL_MASK_PCLASS;
+
+    // Only pseudo-classes with a forgiving selector list argument
+    // are allowed if we're forced to be empty.
+    if ((aFlags & SelectorParsingFlags::eForceEmptyList) &&
+        !pseudoClassHasForgivingSelectorListArg) {
+      if (eCSSToken_Function == mToken.mType) {
+        SkipUntil(')');
+      }
+      return eSelectorParsingStatus_Continue;
+    }
+
     if (eCSSToken_Function == mToken.mType) {
       nsSelectorParsingStatus parsingStatus;
-      if (nsCSSPseudoClasses::HasStringArg(pseudoClassType)) {
+
+      // Pass only a few parsing flags down the chain.
+      SelectorParsingFlags flags = SelectorParsingFlags::eNone;
+      if (aFlags & SelectorParsingFlags::eDisallowCombinators) {
+        flags |= SelectorParsingFlags::eDisallowCombinators;
+      }
+      if (aFlags & SelectorParsingFlags::eForceEmptyList ||
+          forceEmptyList) {
+        flags |= SelectorParsingFlags::eForceEmptyList;
+      }
+
+      if (sLegacyNegationPseudoClassEnabled &&
+          CSSPseudoClassType::negation == pseudoClassType) {
+        // :not() can't be itself negated
+        if (isNegated) {
+          REPORT_UNEXPECTED_TOKEN(PEPseudoSelDoubleNot);
+          UngetToken();
+          return eSelectorParsingStatus_Error;
+        }
+        // CSS 3 Negation pseudo-class takes one simple selector as argument
+        parsingStatus =
+          ParseNegatedSimpleSelector(aDataMask, aSelector, flags);
+        if (eSelectorParsingStatus_Continue != parsingStatus) {
+          return parsingStatus;
+        }
+      }
+      else if (nsCSSPseudoClasses::IsHybridPseudoElement(pseudoClassType) &&
+               hybridPseudoElementType == CSSPseudoElementType::NotPseudo) {
+        // Reject the single colon syntax for hybrid pseudo-elements.
+        REPORT_UNEXPECTED_TOKEN(PEPseudoSelNewStyleOnly);
+        UngetToken();
+        return eSelectorParsingStatus_Error;
+      }
+      else if (nsCSSPseudoClasses::HasStringArg(pseudoClassType)) {
         parsingStatus =
           ParsePseudoClassWithIdentArg(aSelector, pseudoClassType);
       }
@@ -6140,8 +6351,17 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
       else {
         MOZ_ASSERT(nsCSSPseudoClasses::HasSelectorListArg(pseudoClassType),
                    "unexpected pseudo with function token");
+        if (hybridPseudoElementType != CSSPseudoElementType::NotPseudo) {
+          aSelector.SetHybridPseudoType(hybridPseudoElementType);
+          // Ensure hybrid pseudo-elements are rejected if they're not allowed.
+          if (disallowPseudoElements) {
+            UngetToken();
+            return eSelectorParsingStatus_Error;
+          }
+        }
         parsingStatus = ParsePseudoClassWithSelectorListArg(aSelector,
-                                                            pseudoClassType);
+                                                            pseudoClassType,
+                                                            flags);
       }
       if (eSelectorParsingStatus_Continue != parsingStatus) {
         if (eSelectorParsingStatus_Error == parsingStatus) {
@@ -6157,8 +6377,15 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
   else if (isPseudoElement || isAnonBox) {
     // Pseudo-element.  Make some more sanity checks.
 
-    if (aIsNegated) { // pseudo-elements can't be negated
+    // Pseudo-elements can't be negated.
+    if (isNegated) {
       REPORT_UNEXPECTED_TOKEN(PEPseudoSelPEInNot);
+      UngetToken();
+      return eSelectorParsingStatus_Error;
+    }
+    // Pseudo-elements might not be allowed from appearing
+    // (e.g. as an argument to the functional part of a pseudo-class).
+    if (disallowPseudoElements) {
       UngetToken();
       return eSelectorParsingStatus_Error;
     }
@@ -6232,9 +6459,12 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
 // Parse the argument of a negation pseudo-class :not()
 //
 CSSParserImpl::nsSelectorParsingStatus
-CSSParserImpl::ParseNegatedSimpleSelector(int32_t&       aDataMask,
-                                          nsCSSSelector& aSelector)
+CSSParserImpl::ParseNegatedSimpleSelector(int32_t&              aDataMask,
+                                          nsCSSSelector&        aSelector,
+                                          SelectorParsingFlags& aFlags)
 {
+  aFlags |= SelectorParsingFlags::eIsNegated;
+
   if (! GetToken(true)) { // premature eof
     REPORT_UNEXPECTED_EOF(PENegationEOF);
     return eSelectorParsingStatus_Error;
@@ -6267,7 +6497,7 @@ CSSParserImpl::ParseNegatedSimpleSelector(int32_t&       aDataMask,
     parsingStatus = ParseClassSelector(aDataMask, *newSel);
   }
   else if (mToken.IsSymbol(':')) {    // :pseudo
-    parsingStatus = ParsePseudoSelector(aDataMask, *newSel, true,
+    parsingStatus = ParsePseudoSelector(aDataMask, *newSel, aFlags,
                                         nullptr, nullptr, nullptr);
   }
   else if (mToken.IsSymbol('[')) {    // [attribute
@@ -6279,7 +6509,7 @@ CSSParserImpl::ParseNegatedSimpleSelector(int32_t&       aDataMask,
   }
   else {
     // then it should be a type element or universal selector
-    parsingStatus = ParseTypeOrUniversalSelector(aDataMask, *newSel, true);
+    parsingStatus = ParseTypeOrUniversalSelector(aDataMask, *newSel, aFlags);
   }
   if (eSelectorParsingStatus_Error == parsingStatus) {
     REPORT_UNEXPECTED_TOKEN(PENegationBadInner);
@@ -6505,29 +6735,60 @@ CSSParserImpl::ParsePseudoClassWithNthPairArg(nsCSSSelector& aSelector,
 
 //
 // Parse the argument of a pseudo-class that has a selector list argument.
-// Such selector lists cannot contain combinators, but can contain
-// anything that goes between a pair of combinators.
 //
 CSSParserImpl::nsSelectorParsingStatus
 CSSParserImpl::ParsePseudoClassWithSelectorListArg(nsCSSSelector& aSelector,
-                                                   CSSPseudoClassType aType)
+                                                   CSSPseudoClassType aType,
+                                                   SelectorParsingFlags& aFlags)
 {
+  bool isSingleSelector =
+    nsCSSPseudoClasses::HasSingleSelectorArg(aType);
+
+  if (nsCSSPseudoClasses::HasForgivingSelectorListArg(aType)) {
+    aFlags |= SelectorParsingFlags::eIsForgiving;
+  } else if (isSingleSelector || aType == CSSPseudoClassType::mozAny) {
+    aFlags |= SelectorParsingFlags::eDisallowCombinators;
+  } else if (aType == CSSPseudoClassType::negation) {
+    aFlags |= SelectorParsingFlags::eInheritNamespace;
+  }
+  aFlags |= SelectorParsingFlags::eDisallowPseudoElements;
+
   nsAutoPtr<nsCSSSelectorList> slist;
-  if (! ParseSelectorList(*getter_Transfers(slist), char16_t(')'))) {
+  if (! ParseSelectorList(*getter_Transfers(slist),
+                          char16_t(')'),
+                          aFlags)) {
     return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
   }
 
-  // Check that none of the selectors in the list have combinators or
-  // pseudo-elements.
-  for (nsCSSSelectorList *l = slist; l; l = l->mNext) {
-    nsCSSSelector *s = l->mSelectors;
-    if (s->mNext || s->IsPseudoElement()) {
-      return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
-    }
+  if (isSingleSelector && slist->mNext) {
+    return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
   }
 
-  // Add the pseudo with the selector list parameter
-  aSelector.AddPseudoClass(aType, slist.forget());
+  // Special handling for the :not() pseudo-class.
+  if (aType == CSSPseudoClassType::negation) {
+    nsCSSSelector* negations = &aSelector;
+    while (negations->mNegations) {
+      negations = negations->mNegations;
+    }
+    // XXX: Use a special internal-only pseudo-class to handle selector lists
+    // if we have: (a) a complex selector, (b) nested negation pseudo-class,
+    // or (c) more than one selector argument in the list.
+    if (slist->mNext ||
+        slist->mSelectors->mNext ||
+        slist->mSelectors->mNegations) {
+      nsCSSSelector* newSel = new nsCSSSelector();
+      newSel->AddPseudoClass(CSSPseudoClassType::mozAnyPrivate,
+                             slist.forget());
+      negations->mNegations = newSel;
+    } else {
+      // Otherwise, steal the first selector and add it directly to the
+      // end of aSelector.mNegations.
+      negations->mNegations = (slist.forget())->mSelectors;
+    }
+  } else {
+    // Add the pseudo with the selector list parameter
+    aSelector.AddPseudoClass(aType, slist.forget());
+  }
 
   // close the parenthesis
   if (!ExpectSymbol(')', true)) {
@@ -6545,7 +6806,8 @@ CSSParserImpl::ParsePseudoClassWithSelectorListArg(nsCSSSelector& aSelector,
  */
 bool
 CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
-                             char16_t aPrevCombinator)
+                             char16_t aPrevCombinator,
+                             SelectorParsingFlags& aFlags)
 {
   if (! GetToken(true)) {
     REPORT_UNEXPECTED_EOF(PESelectorEOF);
@@ -6559,11 +6821,11 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
 
   int32_t dataMask = 0;
   nsSelectorParsingStatus parsingStatus =
-    ParseTypeOrUniversalSelector(dataMask, *selector, false);
+    ParseTypeOrUniversalSelector(dataMask, *selector, aFlags);
 
   while (parsingStatus == eSelectorParsingStatus_Continue) {
     if (mToken.IsSymbol(':')) {    // :pseudo
-      parsingStatus = ParsePseudoSelector(dataMask, *selector, false,
+      parsingStatus = ParsePseudoSelector(dataMask, *selector, aFlags,
                                           getter_AddRefs(pseudoElement),
                                           getter_Transfers(pseudoElementArgs),
                                           &pseudoElementType);
@@ -6580,7 +6842,8 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
         selector->mClassList = pseudoElementArgs.forget();
         selector->SetPseudoType(pseudoElementType);
       }
-    } else if (selector->IsPseudoElement()) {
+    } else if (selector->IsPseudoElement() ||
+               selector->IsHybridPseudoElement()) {
       // Once we parsed a pseudo-element, we can only parse
       // pseudo-classes (and only a limited set, which
       // ParsePseudoSelector knows how to handle).
@@ -6614,11 +6877,25 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
     }
   }
 
+  // Treat every other selector as invalid.
+  if ((aFlags & SelectorParsingFlags::eForceEmptyList) &&
+      (selector->mIDList || selector->mClassList ||
+       selector->mAttrList || selector->mNegations ||
+       !selector->mPseudoClassList)) {
+    return false;
+  }
+
   if (parsingStatus == eSelectorParsingStatus_Error) {
     return false;
   }
 
   if (!dataMask) {
+    // XXX(franklindm): We're effectively ignoring stray combinators
+    // and empty selector groups here for forgiving selector lists.
+    // It doesn't seem right, but this is how tainted browsers do it.
+    if (aFlags & SelectorParsingFlags::eIsForgiving) {
+      return false;
+    }
     if (selector->mNext) {
       REPORT_UNEXPECTED(PESelectorGroupExtraCombinator);
     } else {
@@ -6754,7 +7031,15 @@ CSSParserImpl::ParseColor(nsCSSValue& aValue)
         if (GetToken(true)) {
           UngetToken();
         }
-        if (mToken.mType == eCSSToken_Number) { // <number>
+
+        bool isNumber = mToken.mType == eCSSToken_Number;
+
+        // Check first if we have percentage values inside the function.
+        if (mToken.mType == eCSSToken_Function) {
+          isNumber = !LookForTokenType(eCSSToken_Percentage);
+        }
+
+        if (isNumber) { // <number>
           uint8_t r, g, b, a;
 
           if (ParseRGBColor(r, g, b, a)) {
@@ -6861,13 +7146,21 @@ CSSParserImpl::ParseColorComponent(uint8_t& aComponent, Maybe<char> aSeparator)
     return false;
   }
 
-  if (mToken.mType != eCSSToken_Number) {
+  float value;
+  if (mToken.mType == eCSSToken_Number) {
+    value = mToken.mNumber;
+  } else if (IsCalcFunctionToken(mToken)) {
+    nsCSSValue aValue;
+    if (!ParseCalc(aValue, VARIANT_LPN | VARIANT_CALC)) {
+      return false;
+    }
+    ReduceNumberCalcOps ops;
+    value = mozilla::css::ComputeCalc(aValue, ops);
+  } else {
     REPORT_UNEXPECTED_TOKEN(PEExpectedNumber);
     UngetToken();
     return false;
   }
-
-  float value = mToken.mNumber;
 
   if (aSeparator && !ExpectSymbol(*aSeparator, true)) {
     REPORT_UNEXPECTED_TOKEN_CHAR(PEColorComponentBadTerm, *aSeparator);
@@ -6889,13 +7182,21 @@ CSSParserImpl::ParseColorComponent(float& aComponent, Maybe<char> aSeparator)
     return false;
   }
 
-  if (mToken.mType != eCSSToken_Percentage) {
+  float value;
+  if (mToken.mType == eCSSToken_Percentage) {
+    value = mToken.mNumber;
+  } else if (IsCalcFunctionToken(mToken)) {
+    nsCSSValue aValue;
+    if (!ParseCalc(aValue, VARIANT_LPN | VARIANT_CALC)) {
+      return false;
+    }
+    ReduceNumberCalcOps ops;
+    value = mozilla::css::ComputeCalc(aValue, ops);
+  } else {
     REPORT_UNEXPECTED_TOKEN(PEExpectedPercent);
     UngetToken();
     return false;
   }
-
-  float value = mToken.mNumber;
 
   if (aSeparator && !ExpectSymbol(*aSeparator, true)) {
     REPORT_UNEXPECTED_TOKEN_CHAR(PEColorComponentBadTerm, *aSeparator);
@@ -7638,14 +7939,6 @@ CSSParserImpl::ParseOneOrLargerVariant(nsCSSValue& aValue,
   return result;
 }
 
-static bool
-IsCSSTokenCalcFunction(const nsCSSToken& aToken)
-{
-  return aToken.mType == eCSSToken_Function &&
-         (aToken.mIdent.LowerCaseEqualsLiteral("calc") ||
-          aToken.mIdent.LowerCaseEqualsLiteral("-moz-calc"));
-}
-
 // Assigns to aValue iff it returns CSSParseResult::Ok.
 CSSParseResult
 CSSParserImpl::ParseVariant(nsCSSValue& aValue,
@@ -7945,7 +8238,7 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
     }
   }
   if ((aVariantMask & VARIANT_CALC) &&
-      IsCSSTokenCalcFunction(*tk)) {
+      IsCalcFunctionToken(*tk)) {
     // calc() currently allows only lengths and percents and number inside it.
     // And note that in current implementation, number cannot be mixed with
     // length and percent.
@@ -10466,7 +10759,7 @@ CSSParserImpl::IsLegacyGradientLine(const nsCSSTokenType& aType,
       haveGradientLine = true;
       break;
     }
-    MOZ_FALLTHROUGH;
+    [[fallthrough]];
   case eCSSToken_ID:
   case eCSSToken_Hash:
     // this is a color
@@ -11149,10 +11442,10 @@ CSSParserImpl::ParseBoxProperties(const nsCSSPropertyID aPropIDs[])
   switch (count) {
     case 1: // Make right == top
       result.mRight = result.mTop;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case 2: // Make bottom == top
       result.mBottom = result.mTop;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case 3: // Make left == right
       result.mLeft = result.mRight;
   }
@@ -11195,10 +11488,10 @@ CSSParserImpl::ParseGroupedBoxProperty(int32_t aVariantMask,
   switch (count) {
     case 1: // Make right == top
       result.mRight = result.mTop;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case 2: // Make bottom == top
       result.mBottom = result.mTop;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case 3: // Make left == right
       result.mLeft = result.mRight;
   }
@@ -11296,10 +11589,10 @@ CSSParserImpl::ParseBoxCornerRadiiInternals(nsCSSValue array[])
   switch (countX) {
     case 1: // Make top-right same as top-left
       dimenX.mRight = dimenX.mTop;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case 2: // Make bottom-right same as top-left
       dimenX.mBottom = dimenX.mTop;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case 3: // Make bottom-left same as top-right
       dimenX.mLeft = dimenX.mRight;
   }
@@ -11307,10 +11600,10 @@ CSSParserImpl::ParseBoxCornerRadiiInternals(nsCSSValue array[])
   switch (countY) {
     case 1: // Make top-right same as top-left
       dimenY.mRight = dimenY.mTop;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case 2: // Make bottom-right same as top-left
       dimenY.mBottom = dimenY.mTop;
-      MOZ_FALLTHROUGH;
+      [[fallthrough]];
     case 3: // Make bottom-left same as top-right
       dimenY.mLeft = dimenY.mRight;
   }
@@ -11754,6 +12047,8 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
     return ParseInitialLetter();
   case eCSSProperty_justify_items:
     return ParseJustifyItems();
+  case eCSSProperty_inset:
+    return ParseInset();
   case eCSSProperty_list_style:
     return ParseListStyle();
   case eCSSProperty_margin:
@@ -12205,6 +12500,14 @@ CSSParserImpl::IsFunctionTokenValidForImageLayerImage(
       funcName.LowerCaseEqualsLiteral("-webkit-radial-gradient") ||
       funcName.LowerCaseEqualsLiteral("-webkit-repeating-linear-gradient") ||
       funcName.LowerCaseEqualsLiteral("-webkit-repeating-radial-gradient")));
+}
+
+bool
+CSSParserImpl::IsCalcFunctionToken(const nsCSSToken& aToken) const
+{
+  return aToken.mType == eCSSToken_Function &&
+         (aToken.mIdent.LowerCaseEqualsLiteral("calc") ||
+          aToken.mIdent.LowerCaseEqualsLiteral("-moz-calc"));
 }
 
 // Parse one item of the background shorthand property.
@@ -13599,21 +13902,6 @@ CSSParserImpl::ParseCalcAdditiveExpression(nsCSSValue& aValue,
   }
 }
 
-struct ReduceNumberCalcOps : public mozilla::css::BasicFloatCalcOps,
-                             public mozilla::css::CSSValueInputCalcOps
-{
-  result_type ComputeLeafValue(const nsCSSValue& aValue)
-  {
-    MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Number, "unexpected unit");
-    return aValue.GetFloatValue();
-  }
-
-  float ComputeNumber(const nsCSSValue& aValue)
-  {
-    return mozilla::css::ComputeCalc(aValue, *this);
-  }
-};
-
 //  * If aVariantMask is VARIANT_NUMBER, this function parses the
 //    <number-multiplicative-expression> production.
 //  * If aVariantMask does not contain VARIANT_NUMBER, this function
@@ -13734,7 +14022,7 @@ CSSParserImpl::ParseCalcTerm(nsCSSValue& aValue, uint32_t& aVariantMask)
   // Either an additive expression in parentheses...
   if (mToken.IsSymbol('(') ||
       // Treat nested calc() as plain parenthesis.
-      IsCSSTokenCalcFunction(mToken)) {
+      IsCalcFunctionToken(mToken)) {
     if (!ParseCalcAdditiveExpression(aValue, aVariantMask) ||
         !ExpectSymbol(')', true)) {
       SkipUntil(')');
@@ -15180,6 +15468,19 @@ CSSParserImpl::ParseListStyle()
     AppendValue(listStyleIDs[index], values[index]);
   }
   return true;
+}
+
+bool
+CSSParserImpl::ParseInset()
+{
+  static const nsCSSPropertyID kInsetSideIDs[] = {
+    eCSSProperty_top,
+    eCSSProperty_right,
+    eCSSProperty_bottom,
+    eCSSProperty_left
+  };
+
+  return ParseBoxProperties(kInsetSideIDs);
 }
 
 bool
@@ -17780,6 +18081,8 @@ nsCSSParser::Startup()
                                "layout.css.prefixes.gradients");
   Preferences::AddBoolVarCache(&sControlCharVisibility,
                                "layout.css.control-characters.visible");
+  Preferences::AddBoolVarCache(&sLegacyNegationPseudoClassEnabled,
+                               "layout.css.legacy-negation-pseudo.enabled");
 }
 
 nsCSSParser::nsCSSParser(mozilla::css::Loader* aLoader,

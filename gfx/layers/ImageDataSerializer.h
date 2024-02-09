@@ -1,7 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -65,6 +63,7 @@ gfx::IntSize SizeFromBufferDescriptor(const BufferDescriptor& aDescriptor);
 Maybe<gfx::IntSize> CbCrSizeFromBufferDescriptor(const BufferDescriptor& aDescriptor);
 
 Maybe<YUVColorSpace> YUVColorSpaceFromBufferDescriptor(const BufferDescriptor& aDescriptor);
+Maybe<ColorRange> ColorRangeFromBufferDescriptor(const BufferDescriptor& aDescriptor);
 
 Maybe<StereoMode> StereoModeFromBufferDescriptor(const BufferDescriptor& aDescriptor);
 

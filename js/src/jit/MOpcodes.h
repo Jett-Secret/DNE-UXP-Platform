@@ -11,27 +11,6 @@ namespace jit {
 
 #define MIR_OPCODE_LIST(_)                                                  \
     _(Constant)                                                             \
-    _(SimdBox)                                                              \
-    _(SimdUnbox)                                                            \
-    _(SimdValueX4)                                                          \
-    _(SimdSplat)                                                            \
-    _(SimdConstant)                                                         \
-    _(SimdConvert)                                                          \
-    _(SimdReinterpretCast)                                                  \
-    _(SimdExtractElement)                                                   \
-    _(SimdInsertElement)                                                    \
-    _(SimdSwizzle)                                                          \
-    _(SimdGeneralShuffle)                                                   \
-    _(SimdShuffle)                                                          \
-    _(SimdUnaryArith)                                                       \
-    _(SimdBinaryComp)                                                       \
-    _(SimdBinaryArith)                                                      \
-    _(SimdBinarySaturating)                                                 \
-    _(SimdBinaryBitwise)                                                    \
-    _(SimdShift)                                                            \
-    _(SimdSelect)                                                           \
-    _(SimdAllTrue)                                                          \
-    _(SimdAnyTrue)                                                          \
     _(CloneLiteral)                                                         \
     _(Parameter)                                                            \
     _(Callee)                                                               \
@@ -87,7 +66,8 @@ namespace jit {
     _(Lsh)                                                                  \
     _(Rsh)                                                                  \
     _(Ursh)                                                                 \
-    _(SignExtend)                                                           \
+    _(SignExtendInt32)                                                      \
+    _(SignExtendInt64)                                                      \
     _(MinMax)                                                               \
     _(Abs)                                                                  \
     _(Clz)                                                                  \
@@ -123,6 +103,7 @@ namespace jit {
     _(ToDouble)                                                             \
     _(ToFloat32)                                                            \
     _(ToInt32)                                                              \
+    _(ToNumeric)                                                            \
     _(TruncateToInt32)                                                      \
     _(WrapInt64ToInt32)                                                     \
     _(ExtendInt32ToInt64)                                                   \
@@ -284,6 +265,8 @@ namespace jit {
     _(GlobalNameConflictsCheck)                                             \
     _(Debugger)                                                             \
     _(NewTarget)                                                            \
+    _(ModuleMetadata)                                                       \
+    _(DynamicImport)                                                        \
     _(ArrowNewTarget)                                                       \
     _(CheckReturn)                                                          \
     _(CheckIsObj)                                                           \

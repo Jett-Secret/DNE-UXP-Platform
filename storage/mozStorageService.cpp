@@ -1,5 +1,4 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=2 et lcs=trail\:.,tab\:>~ :
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -27,7 +26,7 @@
 
 #include "sqlite3.h"
 
-#ifdef SQLITE_OS_WIN
+#ifdef XP_WIN
 // "windows.h" was included and it can #define lots of things we care about...
 #undef CompareString
 #endif
@@ -917,6 +916,12 @@ Service::Observe(nsISupports *, const char *aTopic, const char16_t *)
       getConnections(connections);
       for (uint32_t i = 0, n = connections.Length(); i < n; i++) {
         if (!connections[i]->isClosed()) {
+#ifdef DEBUG
+          nsCString msg;
+          msg.AppendPrintf("Storage connection to '%s' was not closed.",
+                           connections[i]->getFilename().get());
+          NS_ERROR(msg.get());
+#endif
           MOZ_CRASH();
         }
       }
